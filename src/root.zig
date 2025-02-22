@@ -161,7 +161,7 @@ pub const Node = union(TAG) {
                     break :blk ba.len;
                 },
                 .String => |str| {
-                    break :blk str.len;
+                    break :blk str.len + 2;
                 },
                 .List => |lst| {
                     var out: usize = 1 + (Node{ .Int = 0 }).length();
@@ -216,6 +216,10 @@ pub const Node = union(TAG) {
             .{
                 .node = .{ .Double = undefined },
                 .expectedLength = 9,
+            },
+            .{
+                .node = .{ .String = "hello world" },
+                .expectedLength = 1 + 2 + "hello world".len,
             },
         };
 
@@ -300,10 +304,11 @@ pub const NamedTag = struct {
     }
 };
 
-fn parseFromBytes(
+pub fn parseFromBytes(
     input: []const u8,
     allocator: std.mem.Allocator,
 ) !NamedTag {
+    std.log.info("Parsgin from: {any}", .{input});
     var arenaAlloc = std.heap.ArenaAllocator.init(allocator);
     errdefer arenaAlloc.deinit();
     return parseNamedTagFromBytesInner(input, arenaAlloc.allocator());
@@ -318,11 +323,14 @@ fn parseNamedTagFromBytesInner(
     }
 
     const tag = try std.meta.intToEnum(TAG, input[0]);
+    std.log.info("Parsing tag: {s}", .{@tagName(tag)});
 
-    const name = try parseString(input[1..], allocator);
-    errdefer allocator.free(name.String);
+    const name = try parseAssumeString(input[2..], allocator);
+    const nameStr = name.String;
+    errdefer allocator.free(nameStr);
 
-    const afterName = input[1 + name.length() ..];
+    const afterName = input[2 + name.length() ..];
+    std.log.info("After name: {any}", .{afterName});
 
     switch (tag) {
         .Byte => {
@@ -331,7 +339,7 @@ fn parseNamedTagFromBytesInner(
                 afterName,
             );
             return NamedTag{
-                .name = name,
+                .name = nameStr,
                 .tag = .{ .Byte = byte },
             };
         },
@@ -341,7 +349,7 @@ fn parseNamedTagFromBytesInner(
                 afterName,
             );
             return NamedTag{
-                .name = name,
+                .name = nameStr,
                 .tag = .{ .Short = short },
             };
         },
@@ -351,7 +359,7 @@ fn parseNamedTagFromBytesInner(
                 afterName,
             );
             return NamedTag{
-                .name = name,
+                .name = nameStr,
                 .tag = .{ .Int = int },
             };
         },
@@ -361,7 +369,7 @@ fn parseNamedTagFromBytesInner(
                 afterName,
             );
             return NamedTag{
-                .name = name,
+                .name = nameStr,
                 .tag = .{ .Long = long },
             };
         },
@@ -371,7 +379,7 @@ fn parseNamedTagFromBytesInner(
                 afterName,
             );
             return NamedTag{
-                .name = name,
+                .name = nameStr,
                 .tag = .{ .Float = float },
             };
         },
@@ -381,21 +389,21 @@ fn parseNamedTagFromBytesInner(
                 afterName,
             );
             return NamedTag{
-                .name = name,
+                .name = nameStr,
                 .tag = .{ .Double = double },
             };
         },
         .ByteArray => {
             const byteArray = try parseByteArray(afterName, allocator);
             return NamedTag{
-                .name = name,
+                .name = nameStr,
                 .tag = byteArray,
             };
         },
         .String => {
             const string = try parseString(afterName, allocator);
             return NamedTag{
-                .name = name,
+                .name = nameStr,
                 .tag = string,
             };
         },
@@ -403,7 +411,7 @@ fn parseNamedTagFromBytesInner(
             unreachable;
         },
         .Compound => {
-            var entries = std.ArrayList(Node).init(allocator);
+            var entries = std.ArrayList(NamedTag).init(allocator);
             errdefer entries.deinit();
             var cur = afterName[0..];
             while (cur.len > 0 and cur[0] != @intFromEnum(TAG.End)) {
@@ -412,12 +420,13 @@ fn parseNamedTagFromBytesInner(
                 cur = cur[namedTag.length()..];
             }
             return NamedTag{
-                .name = name,
+                .name = nameStr,
                 .tag = .{ .Compound = try entries.toOwnedSlice() },
             };
         },
         .List => {},
     }
+    unreachable;
 }
 
 fn parseNodeFromBytes(
@@ -513,11 +522,12 @@ fn parseByteArray(
     if (arrBuf.len < len.Int) {
         return error.EndOfStream;
     }
+    const uLen: usize = @intCast(len.Int);
 
-    var arr = try allocator.alloc(u8, len.Short);
+    var arr = try allocator.alloc(u8, uLen);
     errdefer allocator.free(arr);
 
-    @memcpy(&arr, arrBuf[0..len.Short]);
+    @memcpy(arr[0..], arrBuf[0..uLen]);
 
     return Node{
         .ByteArray = arr,
@@ -537,7 +547,7 @@ fn parseString(input: []const u8, allocator: std.mem.Allocator) !Node {
 test parseString {
     const alloc = std.testing.allocator;
     const str = "test string";
-    const input = [_]u8{ @intFromEnum(TAG.String), @intFromEnum(TAG.Short) } //
+    const input = [_]u8{@intFromEnum(TAG.String)} //
     ++ comptime intToBytesBigEndian(@as(i16, str.len)) ++ str;
     const out = try parseString(input, alloc);
     defer alloc.free(out.String);
@@ -551,8 +561,7 @@ fn parseAssumeString(
     input: []const u8,
     allocator: std.mem.Allocator,
 ) !Node {
-    const len = try parseShort(input);
-    std.debug.assert(len == TAG.Short);
+    const len = try parseAssumeShort(input);
 
     if (len.Short < 0) {
         return error.NegativeLength;
@@ -560,8 +569,10 @@ fn parseAssumeString(
 
     const ulen: usize = @intCast(len.Short);
 
-    const strBuf = input[len.length()..];
+    const strBuf = input[2..];
     if (strBuf.len < ulen) {
+        std.log.err("Too short for len: {}", .{ulen});
+        std.log.err("Is len: {}", .{strBuf.len});
         return error.EndOfStream;
     }
 
@@ -576,13 +587,20 @@ fn parseAssumeString(
 }
 
 fn parseShort(input: []const u8) !Node {
-    if (input.len < 2) {
+    if (input.len < 3) {
         return error.EndOfStream;
     }
     if (input[0] != @intFromEnum(TAG.Short)) {
         return error.NotShort;
     }
-    const short = try bytesToIntBigEndian(i16, input[1..]);
+    return parseAssumeShort(input[1..]);
+}
+
+fn parseAssumeShort(input: []const u8) !Node {
+    if (input.len < 2) {
+        return error.EndOfStream;
+    }
+    const short = try bytesToIntBigEndian(i16, input);
     return Node{
         .Short = short,
     };
@@ -597,7 +615,7 @@ fn parseInt(input: []const u8) !Node {
     }
     const short = try bytesToIntBigEndian(i32, input[1..]);
     return Node{
-        .Short = short,
+        .Int = short,
     };
 }
 
@@ -605,14 +623,18 @@ fn bytesToIntBigEndian(comptime T: type, input: []const u8) !T {
     if (input.len < @sizeOf(T)) {
         return error.TooFewBytes;
     }
+    const intT = @Type(std.builtin.Type{ .int = .{
+        .signedness = .unsigned,
+        .bits = @bitSizeOf(T),
+    } });
 
-    var out: T = std.mem.bytesToValue(T, input[0..@sizeOf(T)]);
+    var out: intT = std.mem.bytesToValue(intT, input[0..@sizeOf(T)]);
 
     if (native_endian == .little) {
         out = @byteSwap(out);
     }
 
-    return out;
+    return @bitCast(out);
 }
 
 fn intToBytesBigEndian(input: anytype) [@sizeOf(@TypeOf(input))]u8 {

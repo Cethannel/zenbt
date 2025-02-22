@@ -2,21 +2,25 @@
 //! you are building an executable. If you are making a library, the convention
 //! is to delete this file and start with root.zig instead.
 const std = @import("std");
+const root = @import("root.zig");
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
-
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
-
-    try bw.flush(); // Don't forget to flush!
+    const allocator = std.heap.page_allocator;
+    var argsIter = std.process.args();
+    _ = argsIter.next();
+    if (argsIter.next()) |input| {
+        std.debug.print("Input file: {s}\n", .{input});
+        var inFile = try std.fs.cwd().openFile(input, std.fs.File.OpenFlags{
+            .mode = .read_only,
+        });
+        try inFile.seekTo(0);
+        defer inFile.close();
+        var decompressedData = std.ArrayList(u8).init(allocator);
+        defer decompressedData.deinit();
+        try std.compress.gzip.decompress(inFile.reader(), decompressedData.writer());
+        const out = try root.parseFromBytes(decompressedData.items, allocator);
+        std.debug.print("Out: {}\n", .{out});
+    }
 }
 
 test "simple test" {
