@@ -6,6 +6,9 @@ const NamedTag = ast.NamedTag;
 const Node = ast.Node;
 const TAG = ast.TAG;
 
+const deserializer = @import("deserializer.zig");
+const Parsed = deserializer.Parsed;
+
 const native_endian = @import("builtin").target.cpu.arch.endian();
 
 pub fn parseFromReader(reader: anytype, allocator: std.mem.Allocator) !NamedTag {
@@ -109,6 +112,29 @@ pub fn parseFromBytes(
 ) !NamedTag {
     var stream = std.io.fixedBufferStream(input);
     return parseFromReader(stream.reader(), allocator);
+}
+
+pub fn parseFromType(
+    input: anytype,
+    allocator: std.mem.Allocator,
+) !Parsed(NamedTag) {
+    var parsed = Parsed(NamedTag){
+        .arena = try allocator.create(std.heap.ArenaAllocator),
+        .value = undefined,
+    };
+    parsed.arena.* = std.heap.ArenaAllocator.init(allocator);
+    errdefer parsed.arena.deinit();
+
+    parsed.value = innerParseType(input, parsed.arena.allocator());
+
+    return parsed;
+}
+
+fn innerParseType(
+    input: anytype,
+    allocator: std.mem.Allocator,
+) !NamedTag {
+    switch () {}
 }
 
 fn parseNode(
