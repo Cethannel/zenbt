@@ -8,6 +8,8 @@ const TAG = ast.TAG;
 
 const parser = @import("parser.zig");
 
+pub const parseFromBytes = parser.parseFromBytes;
+
 pub fn Parsed(comptime T: type) type {
     return struct {
         arena: *std.heap.ArenaAllocator,
