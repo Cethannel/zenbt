@@ -19,7 +19,7 @@ pub fn main() !void {
         defer decompressedData.deinit();
         try std.compress.gzip.decompress(inFile.reader(), decompressedData.writer());
         const out = try root.parseFromBytes(decompressedData.items, allocator);
-        std.debug.print("Out: {}\n", .{out});
+        try out.fancyPrintStdOut();
     }
 }
 
