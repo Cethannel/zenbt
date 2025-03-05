@@ -180,7 +180,7 @@ pub const Node = union(TAG) {
                     break :blk @sizeOf(f64);
                 },
                 .ByteArray => |ba| {
-                    break :blk ba.len;
+                    break :blk @sizeOf(i32) + ba.len;
                 },
                 .String => |str| {
                     break :blk str.len + 2;
@@ -198,6 +198,12 @@ pub const Node = union(TAG) {
                         out += value.length();
                     }
                     break :blk out;
+                },
+                .IntArray => |ia| {
+                    break :blk @sizeOf(i32) * (ia.len + 1);
+                },
+                .LongArray => |la| {
+                    break :blk @sizeOf(i32) + @sizeOf(i64) * la.len;
                 },
             }
             unreachable;
@@ -242,6 +248,18 @@ pub const Node = union(TAG) {
             .{
                 .node = .{ .String = "hello world" },
                 .expectedLength = 1 + 2 + "hello world".len,
+            },
+            .{
+                .node = .{ .ByteArray = &[_]u8{ 1, 2, 3, 4, 5, 6, 7 } },
+                .expectedLength = 1 + @sizeOf(i32) + @sizeOf(i8) * 7,
+            },
+            .{
+                .node = .{ .IntArray = &[_]i32{ 1, 2, 3, 4, 5, 6, 7 } },
+                .expectedLength = 1 + @sizeOf(i32) + @sizeOf(i32) * 7,
+            },
+            .{
+                .node = .{ .LongArray = &[_]i64{ 1, 2, 3, 4, 5, 6, 7 } },
+                .expectedLength = 1 + @sizeOf(i32) + @sizeOf(i64) * 7,
             },
         };
 

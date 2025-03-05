@@ -111,6 +111,18 @@ pub fn serializeNode(
         .End => {
             unreachable;
         },
+        .IntArray => |ia| {
+            try writer.writeInt(i32, @intCast(ia.len), std.builtin.Endian.big);
+            for (ia) |i| {
+                try writer.writeInt(i32, i, std.builtin.Endian.big);
+            }
+        },
+        .LongArray => |la| {
+            try writer.writeInt(i32, @intCast(la.len), std.builtin.Endian.big);
+            for (la) |i| {
+                try writer.writeInt(i64, i, std.builtin.Endian.big);
+            }
+        },
     }
 }
 
@@ -119,7 +131,7 @@ test "Round trip test" {
     const servers = @embedFile("./testFiles/servers.dat");
     var arenaAlloc = std.heap.ArenaAllocator.init(allocator);
     defer arenaAlloc.deinit();
-    const nt = try parseFromBytes(servers, arenaAlloc.allocator());
+    const nt = try parseFromBytes(servers, arenaAlloc.allocator(), .{ .printErrors = true });
     const out = try serializeNamedTagAlloc(allocator, nt, .{});
     defer allocator.free(out);
     try std.testing.expectEqualSlices(u8, servers, out);
