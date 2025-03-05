@@ -57,6 +57,16 @@ pub const TAG = enum(u8) {
     ///          The names of the named tags have to be unique within each TAG_Compound
     ///          The order of the tags is not guaranteed.
     Compound = 10,
+
+    /// TYPE: 11 NAME: TAG_Int_Array
+    /// Payload: TAG_Int length
+    ///          An array of ints of unspecified format. The length of this array is <length> bytes
+    IntArray = 11,
+
+    /// TYPE: 12 NAME: TAG_Long_Array
+    /// Payload: TAG_Int length
+    ///          An array of ints of unspecified format. The length of this array is <length> bytes
+    LongArray = 12,
 };
 
 pub const Node = union(TAG) {
@@ -75,6 +85,8 @@ pub const Node = union(TAG) {
         items: []const Node,
     },
     Compound: []const NamedTag,
+    IntArray: []const i32,
+    LongArray: []const i64,
 
     pub fn format(
         self: @This(),
@@ -127,6 +139,18 @@ pub const Node = union(TAG) {
                 for (c) |value| {
                     try writer.print("{}\n", .{value});
                 }
+            },
+            .IntArray => |ia| {
+                try writer.print(
+                    "{any}",
+                    .{ia},
+                );
+            },
+            .LongArray => |la| {
+                try writer.print(
+                    "{any}",
+                    .{la},
+                );
             },
         }
     }
@@ -342,6 +366,12 @@ pub const NamedTag = struct {
                     try writer.print("{}\n", .{value});
                 }
                 try writer.print("}}\n", .{});
+            },
+            .IntArray => |ia| {
+                try writer.print("{any}", .{ia});
+            },
+            .LongArray => |ia| {
+                try writer.print("{any}", .{ia});
             },
         }
     }

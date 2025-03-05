@@ -11,19 +11,30 @@ const Parsed = deserializer.Parsed;
 
 const native_endian = @import("builtin").target.cpu.arch.endian();
 
-pub fn parseFromReader(reader: anytype, allocator: std.mem.Allocator) !NamedTag {
+pub fn parseFromReader(
+    reader: anytype,
+    allocator: std.mem.Allocator,
+    options: ParseOptions,
+) !NamedTag {
     var arenaAllocator = std.heap.ArenaAllocator.init(allocator);
     errdefer arenaAllocator.deinit();
 
-    return parseNamedTag(reader, allocator);
+    return parseNamedTag(reader, allocator, options);
 }
 
 const endName = "End";
 
-fn parseNamedTag(reader: anytype, allocator: std.mem.Allocator) anyerror!NamedTag {
+fn parseNamedTag(
+    reader: anytype,
+    allocator: std.mem.Allocator,
+    options: ParseOptions,
+) anyerror!NamedTag {
     const tagByte: u8 = try reader.readByte();
 
-    const tag = try std.meta.intToEnum(TAG, tagByte);
+    const tag = std.meta.intToEnum(TAG, tagByte) catch |err| {
+        options.logErr("Unknown tag: {}", .{tagByte});
+        return err;
+    };
 
     if (tag == .End) {
         return NamedTag{
@@ -36,7 +47,7 @@ fn parseNamedTag(reader: anytype, allocator: std.mem.Allocator) anyerror!NamedTa
     const nameStr = name.String;
     errdefer allocator.free(nameStr);
 
-    const node: Node = try parseNodeWithTag(reader, allocator, tag);
+    const node: Node = try parseNodeWithTag(reader, allocator, options, tag);
 
     return NamedTag{
         .name = nameStr,
@@ -44,7 +55,12 @@ fn parseNamedTag(reader: anytype, allocator: std.mem.Allocator) anyerror!NamedTa
     };
 }
 
-fn parseNodeWithTag(reader: anytype, allocator: std.mem.Allocator, tag: TAG) !Node {
+fn parseNodeWithTag(
+    reader: anytype,
+    allocator: std.mem.Allocator,
+    options: ParseOptions,
+    tag: TAG,
+) !Node {
     switch (tag) {
         .Byte => {
             return parseAssumeByte(reader);
@@ -74,21 +90,35 @@ fn parseNodeWithTag(reader: anytype, allocator: std.mem.Allocator, tag: TAG) !No
             return .End;
         },
         .Compound => {
-            return parseAssumeCompound(reader, allocator);
+            return parseAssumeCompound(reader, allocator, options);
         },
         .List => {
-            return parseAssumeList(reader, allocator);
+            return parseAssumeList(reader, allocator, options);
+        },
+        .IntArray => {
+            return parseAssumeIntArray(reader, allocator, options);
+        },
+        .LongArray => {
+            return parseAssumeLongArray(reader, allocator, options);
         },
     }
     unreachable;
 }
 
-pub fn parseList(reader: anytype, allocator: std.mem.Allocator) !Node {
+pub fn parseList(
+    reader: anytype,
+    allocator: std.mem.Allocator,
+    options: ParseOptions,
+) !Node {
     try checkConsumeTag(reader, TAG.List);
-    return parseAssumeList(reader, allocator);
+    return parseAssumeList(reader, allocator, options);
 }
 
-pub fn parseAssumeList(reader: anytype, allocator: std.mem.Allocator) !Node {
+pub fn parseAssumeList(
+    reader: anytype,
+    allocator: std.mem.Allocator,
+    options: ParseOptions,
+) !Node {
     const listTagByte: u8 = try reader.readByte();
     const listTag = try std.meta.intToEnum(TAG, listTagByte);
     const len = try parseAssumeInt(reader);
@@ -96,7 +126,7 @@ pub fn parseAssumeList(reader: anytype, allocator: std.mem.Allocator) !Node {
     var items = try std.ArrayList(Node).initCapacity(allocator, uLen);
     errdefer items.deinit();
     for (0..uLen) |_| {
-        items.appendAssumeCapacity(try parseNodeWithTag(reader, allocator, listTag));
+        items.appendAssumeCapacity(try parseNodeWithTag(reader, allocator, options, listTag));
     }
     return Node{
         .List = .{
@@ -106,12 +136,27 @@ pub fn parseAssumeList(reader: anytype, allocator: std.mem.Allocator) !Node {
     };
 }
 
+pub const ParseOptions = struct {
+    printErrors: bool = false,
+
+    pub fn logErr(
+        self: *const @This(),
+        comptime format: []const u8,
+        args: anytype,
+    ) void {
+        if (self.printErrors) {
+            std.log.err(format, args);
+        }
+    }
+};
+
 pub fn parseFromBytes(
     input: []const u8,
     allocator: std.mem.Allocator,
+    options: ParseOptions,
 ) !NamedTag {
     var stream = std.io.fixedBufferStream(input);
-    return parseFromReader(stream.reader(), allocator);
+    return parseFromReader(stream.reader(), allocator, options);
 }
 
 pub fn parseFromType(
@@ -134,18 +179,22 @@ fn innerParseType(
     input: anytype,
     allocator: std.mem.Allocator,
 ) !NamedTag {
-    switch () {}
+    _ = input;
+    _ = allocator;
+    unreachable;
+    //switch () {}
 }
 
 fn parseNode(
     reader: anytype,
     allocator: std.mem.Allocator,
+    options: ParseOptions,
 ) !Node {
     const tagByte: u8 = try reader.readByte();
 
     const tag = try std.meta.intToEnum(TAG, tagByte);
 
-    return parseNodeWithTag(reader, allocator, tag);
+    return parseNodeWithTag(reader, allocator, options, tag);
 }
 
 fn parseAssumeByte(reader: anytype) !Node {
@@ -179,6 +228,44 @@ fn parseAssumeByteArray(reader: anytype, allocator: std.mem.Allocator) !Node {
 
     return Node{
         .ByteArray = arr,
+    };
+}
+
+fn parseAssumeIntArray(
+    reader: anytype,
+    allocator: std.mem.Allocator,
+    options: ParseOptions,
+) !Node {
+    _ = options;
+    const len = try parseAssumeInt(reader);
+    const uLen: usize = @intCast(len.Int);
+    var arr = try allocator.alloc(i32, uLen);
+    errdefer allocator.free(arr);
+    for (0..uLen) |i| {
+        arr[i] = (try parseAssumeInt(reader)).Int;
+    }
+
+    return Node{
+        .IntArray = arr,
+    };
+}
+
+fn parseAssumeLongArray(
+    reader: anytype,
+    allocator: std.mem.Allocator,
+    options: ParseOptions,
+) !Node {
+    _ = options;
+    const len = try parseAssumeInt(reader);
+    const uLen: usize = @intCast(len.Int);
+    var arr = try allocator.alloc(i64, uLen);
+    errdefer allocator.free(arr);
+    for (0..uLen) |i| {
+        arr[i] = (try parseAssumeLong(reader)).Long;
+    }
+
+    return Node{
+        .LongArray = arr,
     };
 }
 
@@ -231,12 +318,16 @@ fn parseAssumeString(
     };
 }
 
-fn parseAssumeCompound(reader: anytype, allocator: std.mem.Allocator) !Node {
+fn parseAssumeCompound(
+    reader: anytype,
+    allocator: std.mem.Allocator,
+    options: ParseOptions,
+) !Node {
     var namedTags = std.ArrayList(NamedTag).init(allocator);
     errdefer namedTags.deinit();
 
-    var namedTag = try parseNamedTag(reader, allocator);
-    while (namedTag.tag != .End) : (namedTag = try parseNamedTag(reader, allocator)) {
+    var namedTag = try parseNamedTag(reader, allocator, options);
+    while (namedTag.tag != .End) : (namedTag = try parseNamedTag(reader, allocator, options)) {
         try namedTags.append(namedTag);
     }
 

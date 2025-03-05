@@ -18,7 +18,9 @@ pub fn main() !void {
         var decompressedData = std.ArrayList(u8).init(allocator);
         defer decompressedData.deinit();
         try std.compress.gzip.decompress(inFile.reader(), decompressedData.writer());
-        const out = try root.parseFromBytes(decompressedData.items, allocator);
+        const out = try root.parseFromBytes(decompressedData.items, allocator, .{
+            .printErrors = true,
+        });
         try out.fancyPrintStdOut();
     }
 }
