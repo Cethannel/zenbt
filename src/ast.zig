@@ -69,6 +69,302 @@ pub const TAG = enum(u8) {
     LongArray = 12,
 };
 
+pub const AstStore = struct {
+    allocator: std.mem.Allocator,
+
+    tag_store: std.ArrayList(TAG),
+    idx_store: std.ArrayList(NodeIndex),
+
+    byte_store: std.ArrayList(i8),
+
+    short_store: std.ArrayList(i16),
+
+    int_store: std.ArrayList(i32),
+
+    long_store: std.ArrayList(i64),
+
+    float_store: std.ArrayList(f32),
+
+    double_store: std.ArrayList(f64),
+
+    byte_array: std.ArrayList(u8),
+    byte_array_idx: std.ArrayList(NodeIndex),
+    byte_array_len: std.ArrayList(u16),
+
+    list_idx: std.ArrayList(NodeIndex),
+    list_len: std.ArrayList(u16),
+
+    compound_idx: std.ArrayList(NodeIndex),
+    compount_len: std.ArrayList(u16),
+
+    name_idx: std.ArrayList(NodeIndex),
+    name_len: std.ArrayList(u16),
+
+    compound_name: std.ArrayList(NodeIndex),
+    compount_node: std.ArrayList(NodeIndex),
+
+    pub const NodeIndex = u16;
+
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return Self{
+            .allocator = allocator,
+            .tag_store = .init(allocator),
+            .idx_store = .init(allocator),
+
+            .byte_store = .init(allocator),
+
+            .short_store = .init(allocator),
+
+            .int_store = .init(allocator),
+
+            .long_store = .init(allocator),
+
+            .float_store = .init(allocator),
+
+            .double_store = .init(allocator),
+
+            .byte_array = .init(allocator),
+            .byte_array_idx = .init(allocator),
+            .byte_array_len = .init(allocator),
+
+            .list_idx = .init(allocator),
+            .list_len = .init(allocator),
+
+            .compound_idx = .init(allocator),
+            .compount_len = .init(allocator),
+
+            .name_idx = .init(allocator),
+            .name_len = .init(allocator),
+
+            .compound_name = .init(allocator),
+            .compount_node = .init(allocator),
+        };
+    }
+
+    pub fn newNode(self: *Self, tag: TAG, idx: NodeIndex) !NodeIndex {
+        try self.tag_store.append(tag);
+        const out_idx = self.tag_store.items.len - 1;
+        try self.idx_store.append(idx);
+
+        std.debug.assert(self.tag_store.items.len == self.idx_store.items.len);
+
+        return @intCast(out_idx);
+    }
+
+    pub fn newByte(self: *Self, value: i8) !NodeIndex {
+        const idx = try self.addItem(.byte_store, value);
+
+        return self.newNode(.Byte, idx);
+    }
+
+    test newByte {
+        var store = setupTest();
+        defer store.deinit();
+
+        const idx = try store.newByte(1);
+
+        try std.testing.expectEqual(TAG.Byte, store.tag_store.items[idx]);
+        try std.testing.expectEqual(1, store.byte_store.items[store.idx_store.items[idx]]);
+    }
+
+    pub fn newShort(self: *Self, value: i16) !NodeIndex {
+        const idx = try self.addItem(.short_store, value);
+
+        return self.newNode(.Short, idx);
+    }
+
+    test newShort {
+        var store = setupTest();
+        defer store.deinit();
+
+        const idx = try store.newShort(1);
+
+        try std.testing.expectEqual(TAG.Short, store.tag_store.items[idx]);
+        try std.testing.expectEqual(1, store.short_store.items[store.idx_store.items[idx]]);
+    }
+
+    pub fn newInt(self: *Self, value: i32) !NodeIndex {
+        const idx = try self.addItem(.int_store, value);
+
+        return self.newNode(.Int, idx);
+    }
+
+    test newInt {
+        var store = setupTest();
+        defer store.deinit();
+
+        const idx = try store.newInt(1);
+
+        try std.testing.expectEqual(TAG.Int, store.tag_store.items[idx]);
+        try std.testing.expectEqual(1, store.int_store.items[store.idx_store.items[idx]]);
+    }
+
+    pub fn newLong(self: *Self, value: i64) !NodeIndex {
+        const idx = try self.addItem(.long_store, value);
+        return self.newNode(.Long, idx);
+    }
+
+    test newLong {
+        var store = setupTest();
+        defer store.deinit();
+
+        const idx = try store.newLong(1);
+
+        try std.testing.expectEqual(TAG.Long, store.tag_store.items[idx]);
+        try std.testing.expectEqual(1, store.long_store.items[store.idx_store.items[idx]]);
+    }
+
+    pub fn newFloat(self: *Self, value: f32) !NodeIndex {
+        const idx = try self.addItem(.float_store, value);
+        return self.newNode(.Float, idx);
+    }
+
+    test newFloat {
+        const allocator = std.testing.allocator;
+        var store = Self.init(allocator);
+        defer store.deinit();
+
+        const idx = try store.newFloat(1.0);
+
+        try std.testing.expectEqual(TAG.Float, store.tag_store.items[idx]);
+        try std.testing.expectEqual(1.0, store.float_store.items[store.idx_store.items[idx]]);
+    }
+
+    fn setupTest() Self {
+        const allocator = std.testing.allocator;
+        return Self.init(allocator);
+    }
+
+    pub fn addItem(
+        self: *Self,
+        comptime field: std.meta.FieldEnum(Self),
+        value: FieldType(field),
+    ) !NodeIndex {
+        try @field(self, @tagName(field)).append(value);
+        return @intCast(@field(self, @tagName(field)).items.len - 1);
+    }
+
+    pub fn newDouble(self: *Self, value: f64) !NodeIndex {
+        const idx = try self.addItem(.double_store, value);
+        return self.newNode(.Double, idx);
+    }
+
+    test newDouble {
+        const allocator = std.testing.allocator;
+        var store = Self.init(allocator);
+        defer store.deinit();
+
+        const idx = try store.newDouble(1.0);
+
+        try std.testing.expectEqual(TAG.Double, store.tag_store.items[idx]);
+        try std.testing.expectEqual(1.0, store.double_store.items[store.idx_store.items[idx]]);
+    }
+
+    fn FieldType(field: std.meta.FieldEnum(Self)) type {
+        const arrListType: type = @FieldType(Self, @tagName(field));
+        const items: type = @FieldType(arrListType, "items");
+        const itemsInfo = @typeInfo(items);
+        return itemsInfo.pointer.child;
+    }
+
+    pub fn newByteArray(self: *Self, arr: []const u8) !NodeIndex {
+        const start = self.byte_array.items.len;
+        try self.byte_array.appendSlice(arr);
+        const end = self.byte_array.items.len;
+        std.debug.assert(end - start == arr.len);
+        const idx = try self.addItem(.byte_array_idx, @intCast(start));
+        const lenIdx = try self.addItem(.byte_array_len, @intCast(arr.len));
+        std.debug.assert(idx == lenIdx);
+
+        return self.newNode(.ByteArray, idx);
+    }
+
+    test newByteArray {
+        var store = setupTest();
+        defer store.deinit();
+
+        const arr = [_]u8{ 1, 2, 3, 4, 5 };
+
+        const idx = try store.newByteArray(arr[0..]);
+
+        try std.testing.expectEqual(TAG.ByteArray, store.tag_store.items[idx]);
+        const arrIdx = store.byte_array_idx.items[idx];
+        try std.testing.expectEqual(0, arrIdx);
+        const arrLen = store.byte_array_len.items[idx];
+        try std.testing.expectEqual(arr.len, arrLen);
+
+        const gotArr = store.byte_array.items[arrIdx..arrLen];
+
+        try std.testing.expectEqualSlices(u8, &arr, gotArr);
+    }
+
+    pub fn newString(self: *Self, str: []const u8) !NodeIndex {
+        const start = self.byte_array.items.len;
+        try self.byte_array.appendSlice(str);
+        const end = self.byte_array.items.len;
+        std.debug.assert(end - start == str.len);
+        const idx = try self.addItem(.byte_array_idx, @intCast(start));
+        const lenIdx = try self.addItem(.byte_array_len, @intCast(str.len));
+        std.debug.assert(idx == lenIdx);
+
+        return self.newNode(.String, idx);
+    }
+
+    test newString {
+        var store = setupTest();
+        defer store.deinit();
+
+        const arr = "Hello World";
+
+        const idx = try store.newByteArray(arr[0..]);
+
+        try std.testing.expectEqual(TAG.ByteArray, store.tag_store.items[idx]);
+        const arrIdx = store.byte_array_idx.items[idx];
+        try std.testing.expectEqual(0, arrIdx);
+        const arrLen = store.byte_array_len.items[idx];
+        try std.testing.expectEqual(arr.len, arrLen);
+
+        const gotArr = store.byte_array.items[arrIdx..arrLen];
+
+        try std.testing.expectEqualSlices(u8, arr, gotArr);
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.tag_store.deinit();
+        self.idx_store.deinit();
+
+        self.byte_store.deinit();
+
+        self.short_store.deinit();
+
+        self.int_store.deinit();
+
+        self.long_store.deinit();
+
+        self.float_store.deinit();
+
+        self.double_store.deinit();
+
+        self.byte_array.deinit();
+        self.byte_array_idx.deinit();
+        self.byte_array_len.deinit();
+
+        self.list_idx.deinit();
+        self.list_len.deinit();
+
+        self.compound_idx.deinit();
+        self.compount_len.deinit();
+
+        self.name_idx.deinit();
+        self.name_len.deinit();
+
+        self.compound_name.deinit();
+        self.compount_node.deinit();
+    }
+};
+
 pub const Node = union(TAG) {
     const Self = @This();
     End,

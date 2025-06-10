@@ -135,6 +135,8 @@ test "Round trip test" {
     const out = try serializeNamedTagAlloc(allocator, nt, .{});
     defer allocator.free(out);
     try std.testing.expectEqualSlices(u8, servers, out);
+
+    std.testing.refAllDecls(ast);
 }
 
 pub fn serializeStringNoTag(

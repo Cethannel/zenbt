@@ -17,7 +17,11 @@ pub fn main() !void {
         defer inFile.close();
         var decompressedData = std.ArrayList(u8).init(allocator);
         defer decompressedData.deinit();
-        try std.compress.gzip.decompress(inFile.reader(), decompressedData.writer());
+        std.compress.gzip.decompress(inFile.reader(), decompressedData.writer()) catch {
+            decompressedData.clearAndFree();
+            try inFile.seekTo(0);
+            try inFile.reader().readAllArrayList(&decompressedData, 1024 * 1024 * 1024);
+        };
         const out = try root.parseFromBytes(decompressedData.items, allocator, .{
             .printErrors = true,
         });
