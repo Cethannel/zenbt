@@ -1,6 +1,8 @@
 const std = @import("std");
 const testing = std.testing;
 
+const utils = @import("utils.zig");
+
 pub const TAG = enum(u8) {
     /// TYPE: 0  NAME: TAG_End
     /// Payload: None.
@@ -35,38 +37,139 @@ pub const TAG = enum(u8) {
 
     /// TYPE: 7  NAME: TAG_Byte_Array
     /// Payload: TAG_Int length
-    ///          An array of bytes of unspecified format. The length of this array is <length> bytes
+    ///          An array of bytes of unspecified format. The length of this
+    ///          array is <length> bytes
     ByteArray = 7,
 
     /// TYPE: 8  NAME: TAG_String
     /// Payload: TAG_Short length
-    ///          An array of bytes defining a string in UTF-8 format. The length of this array is <length> bytes
+    ///          An array of bytes defining a string in UTF-8 format. The
+    ///          length of this array is <length> bytes
     String = 8,
 
     /// TYPE: 9  NAME: TAG_List
     /// Payload: TAG_Byte tagId
     ///          TAG_Int length
-    ///          A sequential list of Tags (not Named Tags), of type <typeId>. The length of this array is <length> Tags
+    ///          A sequential list of Tags (not Named Tags), of type <typeId>.
+    ///          The length of this array is <length> Tags
     /// Notes:   All tags share the same type.
     List = 9,
 
     /// TYPE: 10 NAME: TAG_Compound
-    /// Payload: A sequential list of Named Tags. This array keeps going until a TAG_End is found.
+    /// Payload: A sequential list of Named Tags. This array keeps going until
+    ///          a TAG_End is found.
     ///          TAG_End end
-    /// Notes:   If there's a nested TAG_Compound within this tag, that one will also have a TAG_End, so simply reading until the next TAG_End will not work.
-    ///          The names of the named tags have to be unique within each TAG_Compound
+    /// Notes:   If there's a nested TAG_Compound within this tag, that one
+    ///          will also have a TAG_End, so simply reading until the next
+    ///          TAG_End will not work.
+    ///          The names of the named tags have to be unique within each
+    ///          TAG_Compound
     ///          The order of the tags is not guaranteed.
     Compound = 10,
 
     /// TYPE: 11 NAME: TAG_Int_Array
     /// Payload: TAG_Int length
-    ///          An array of ints of unspecified format. The length of this array is <length> bytes
+    ///          An array of ints of unspecified format. The length of this
+    ///          array is <length> bytes
     IntArray = 11,
 
     /// TYPE: 12 NAME: TAG_Long_Array
     /// Payload: TAG_Int length
-    ///          An array of ints of unspecified format. The length of this array is <length> bytes
+    ///          An array of ints of unspecified format. The length of this
+    ///          array is <length> bytes
     LongArray = 12,
+
+    pub fn typeOf(tag: TAG) type {
+        return switch (tag) {
+            .End => void,
+            .Byte => i8,
+            .Short => i16,
+            .Int => i32,
+            .Long => i64,
+            .Float => f32,
+            .Double => f64,
+            .ByteArray => []u8,
+            .String => []u8,
+            else => @compileError("Unsupported tag: " ++ @tagName(tag)),
+        };
+    }
+
+    const Self = @This();
+
+    pub fn ofType(comptime T: type) Self {
+        const tInfo: std.builtin.Type = @typeInfo(T);
+
+        switch (tInfo) {
+            .int => |int| {
+                if (int.signedness == .unsigned) {
+                    @compileError("Does not support unsiged integers");
+                }
+
+                switch (int.bits) {
+                    8 => return TAG.Byte,
+                    16 => return TAG.Short,
+                    32 => return TAG.Int,
+                    64 => return TAG.Long,
+                    else => {
+                        @compileError(std.fmt.comptimePrint(
+                            "Does not support intagers of size: ",
+                            .{int.bits},
+                        ));
+                    },
+                }
+            },
+            .float => |float| {
+                switch (float.bits) {
+                    32 => return TAG.Float,
+                    64 => return TAG.Double,
+                    else => {
+                        @compileError(std.fmt.comptimePrint(
+                            "Does not support float of size: ",
+                            .{float.bits},
+                        ));
+                    },
+                }
+            },
+            .pointer => |ptr| {
+                switch (ptr.size) {
+                    .one => return ofType(ptr.child),
+                    .c => @compileError("Does not support c pointers"),
+                    else => {},
+                }
+
+                if (specializePtr(ptr.child)) |special| {
+                    return special;
+                }
+
+                return TAG.List;
+            },
+            else => {
+                @compileError("Unsupported type: " ++ @tagName(tInfo));
+            },
+        }
+    }
+
+    fn specializePtr(comptime T: type) ?TAG {
+        const tInfo = @typeInfo(T);
+
+        switch (tInfo) {
+            .int => |int| {
+                switch (int.bits) {
+                    8 => {
+                        if (int.signedness == .unsigned) {
+                            return TAG.ByteArray;
+                        }
+                    },
+                    32 => return TAG.IntArray,
+                    64 => return TAG.LongArray,
+                    else => {},
+                }
+            },
+            else => {},
+        }
+
+        return null;
+    }
 };
 
 pub const AstStore = struct {
@@ -89,21 +192,28 @@ pub const AstStore = struct {
 
     byte_array: std.ArrayList(u8),
     byte_array_idx: std.ArrayList(NodeIndex),
-    byte_array_len: std.ArrayList(u16),
+    byte_array_len: std.ArrayList(NodeLen),
 
     list_idx: std.ArrayList(NodeIndex),
-    list_len: std.ArrayList(u16),
+    list_len: std.ArrayList(NodeLen),
 
     compound_idx: std.ArrayList(NodeIndex),
-    compount_len: std.ArrayList(u16),
+    compound_len: std.ArrayList(NodeLen),
 
     name_idx: std.ArrayList(NodeIndex),
-    name_len: std.ArrayList(u16),
+    name_len: std.ArrayList(NodeLen),
 
     compound_name: std.ArrayList(NodeIndex),
-    compount_node: std.ArrayList(NodeIndex),
+    compound_node: std.ArrayList(NodeIndex),
+
+    int_array_idx: std.ArrayList(NodeIndex),
+    int_array_len: std.ArrayList(NodeLen),
+
+    long_array_idx: std.ArrayList(NodeIndex),
+    long_array_len: std.ArrayList(NodeLen),
 
     pub const NodeIndex = u16;
+    pub const NodeLen = u16;
 
     const Self = @This();
 
@@ -133,28 +243,34 @@ pub const AstStore = struct {
             .list_len = .init(allocator),
 
             .compound_idx = .init(allocator),
-            .compount_len = .init(allocator),
+            .compound_len = .init(allocator),
 
             .name_idx = .init(allocator),
             .name_len = .init(allocator),
 
             .compound_name = .init(allocator),
-            .compount_node = .init(allocator),
+            .compound_node = .init(allocator),
+
+            .int_array_idx = .init(allocator),
+            .int_array_len = .init(allocator),
+
+            .long_array_idx = .init(allocator),
+            .long_array_len = .init(allocator),
         };
     }
 
     pub fn newNode(self: *Self, tag: TAG, idx: NodeIndex) !NodeIndex {
         try self.tag_store.append(tag);
-        const out_idx = self.tag_store.items.len - 1;
         try self.idx_store.append(idx);
 
         std.debug.assert(self.tag_store.items.len == self.idx_store.items.len);
+        const out_idx = self.tag_store.items.len - 1;
 
         return @intCast(out_idx);
     }
 
     pub fn newByte(self: *Self, value: i8) !NodeIndex {
-        const idx = try self.addItem(.byte_store, value);
+        const idx = try self.addItem(.Byte, value);
 
         return self.newNode(.Byte, idx);
     }
@@ -166,11 +282,12 @@ pub const AstStore = struct {
         const idx = try store.newByte(1);
 
         try std.testing.expectEqual(TAG.Byte, store.tag_store.items[idx]);
-        try std.testing.expectEqual(1, store.byte_store.items[store.idx_store.items[idx]]);
+        const byte_idx = store.idx_store.items[idx];
+        try std.testing.expectEqual(1, store.byte_store.items[byte_idx]);
     }
 
     pub fn newShort(self: *Self, value: i16) !NodeIndex {
-        const idx = try self.addItem(.short_store, value);
+        const idx = try self.addItem(.Short, value);
 
         return self.newNode(.Short, idx);
     }
@@ -186,7 +303,7 @@ pub const AstStore = struct {
     }
 
     pub fn newInt(self: *Self, value: i32) !NodeIndex {
-        const idx = try self.addItem(.int_store, value);
+        const idx = try self.addItem(.Int, value);
 
         return self.newNode(.Int, idx);
     }
@@ -202,7 +319,7 @@ pub const AstStore = struct {
     }
 
     pub fn newLong(self: *Self, value: i64) !NodeIndex {
-        const idx = try self.addItem(.long_store, value);
+        const idx = try self.addItem(.Long, value);
         return self.newNode(.Long, idx);
     }
 
@@ -217,7 +334,7 @@ pub const AstStore = struct {
     }
 
     pub fn newFloat(self: *Self, value: f32) !NodeIndex {
-        const idx = try self.addItem(.float_store, value);
+        const idx = try self.addItem(.Float, value);
         return self.newNode(.Float, idx);
     }
 
@@ -239,15 +356,31 @@ pub const AstStore = struct {
 
     pub fn addItem(
         self: *Self,
-        comptime field: std.meta.FieldEnum(Self),
-        value: FieldType(field),
+        comptime tag: TAG,
+        value: anytype,
     ) !NodeIndex {
-        try @field(self, @tagName(field)).append(value);
-        return @intCast(@field(self, @tagName(field)).items.len - 1);
+        return addItemToStore(self.getStore(tag), value);
+    }
+
+    fn addItemToStore(store: anytype, value: anytype) !NodeIndex {
+        if (StoreType(@TypeOf(store)) != @TypeOf(value)) {
+            @compileError(std.fmt.comptimePrint(
+                \\ value is wrong type 
+                \\ expected: {}
+                \\ got: {}
+            ,
+                .{
+                    StoreType(@TypeOf(store)),
+                    @TypeOf(value),
+                },
+            ));
+        }
+        try store.append(value);
+        return @intCast(store.items.len - 1);
     }
 
     pub fn newDouble(self: *Self, value: f64) !NodeIndex {
-        const idx = try self.addItem(.double_store, value);
+        const idx = try self.addItem(.Double, value);
         return self.newNode(.Double, idx);
     }
 
@@ -264,20 +397,60 @@ pub const AstStore = struct {
 
     fn FieldType(field: std.meta.FieldEnum(Self)) type {
         const arrListType: type = @FieldType(Self, @tagName(field));
-        const items: type = @FieldType(arrListType, "items");
+        return StoreType(arrListType);
+    }
+
+    fn StoreType(T: type) type {
+        const storeType = switch (@typeInfo(T)) {
+            .@"struct" => T,
+            .pointer => |ptr| ptr.child,
+            else => @compileError("Unsupported type: " ++ @typeName(T)),
+        };
+        const items: type = @FieldType(storeType, "items");
         const itemsInfo = @typeInfo(items);
         return itemsInfo.pointer.child;
     }
 
-    pub fn newByteArray(self: *Self, arr: []const u8) !NodeIndex {
+    fn toIdx(int: anytype) NodeIndex {
+        const inputT: type = @TypeOf(int);
+        const tInfo = @typeInfo(inputT);
+
+        if (tInfo != .int) {
+            @compileError("int must be an integer");
+        }
+
+        return @intCast(int);
+    }
+
+    fn toLen(int: anytype) NodeLen {
+        const inputT: type = @TypeOf(int);
+        const tInfo = @typeInfo(inputT);
+
+        if (tInfo != .int) {
+            @compileError("int must be an integer");
+        }
+
+        return @intCast(int);
+    }
+
+    fn addToByteArray(self: *Self, arr: []const u8) !NodeIndex {
         const start = self.byte_array.items.len;
         try self.byte_array.appendSlice(arr);
         const end = self.byte_array.items.len;
         std.debug.assert(end - start == arr.len);
-        const idx = try self.addItem(.byte_array_idx, @intCast(start));
-        const lenIdx = try self.addItem(.byte_array_len, @intCast(arr.len));
-        std.debug.assert(idx == lenIdx);
+        return toIdx(start);
+    }
 
+    fn newByteArrayInner(self: *Self, arr: []const u8) !NodeIndex {
+        const start = try self.addToByteArray(arr);
+        const idx = try addItemToStore(&self.byte_array_idx, start);
+        const lenIdx = try addItemToStore(&self.byte_array_len, toLen(arr.len));
+        std.debug.assert(idx == lenIdx);
+        return idx;
+    }
+
+    pub fn newByteArray(self: *Self, arr: []const u8) !NodeIndex {
+        const idx = try self.newByteArrayInner(arr);
         return self.newNode(.ByteArray, idx);
     }
 
@@ -301,13 +474,7 @@ pub const AstStore = struct {
     }
 
     pub fn newString(self: *Self, str: []const u8) !NodeIndex {
-        const start = self.byte_array.items.len;
-        try self.byte_array.appendSlice(str);
-        const end = self.byte_array.items.len;
-        std.debug.assert(end - start == str.len);
-        const idx = try self.addItem(.byte_array_idx, @intCast(start));
-        const lenIdx = try self.addItem(.byte_array_len, @intCast(str.len));
-        std.debug.assert(idx == lenIdx);
+        const idx = try self.newByteArrayInner(str);
 
         return self.newNode(.String, idx);
     }
@@ -329,6 +496,352 @@ pub const AstStore = struct {
         const gotArr = store.byte_array.items[arrIdx..arrLen];
 
         try std.testing.expectEqualSlices(u8, arr, gotArr);
+    }
+
+    fn debugPrint(self: *const Self) void {
+        std.debug.print("{s} {{\n", .{@typeName(Self)});
+
+        inline for (std.meta.fields(Self)) |field| {
+            if (comptime std.mem.eql(u8, field.name, "allocator")) {
+                continue;
+            }
+
+            std.debug.print("  {s}: {any}\n", .{ field.name, @field(self, field.name).items });
+        }
+
+        std.debug.print("}}", .{});
+    }
+
+    pub fn newList(self: *Self, comptime tag: TAG, len: u16) !struct {
+        idx: NodeIndex,
+        arr: []NodeIndex,
+    } {
+        std.debug.assert(self.tag_store.items.len == self.idx_store.items.len);
+        const start_idx = self.idx_store.items.len;
+        const arr = try self.idx_store.addManyAsSlice(@intCast(len));
+        errdefer {
+            self.idx_store.items = self.idx_store.items[0..start_idx];
+        }
+        try self.tag_store.appendNTimes(tag, len);
+
+        const list_idx = try addItemToStore(&self.list_idx, toIdx(start_idx));
+        try self.list_len.append(len);
+
+        const idx = try self.newNode(.List, list_idx);
+
+        utils.assertEq(idx + 1, @as(u16, @intCast(self.idx_store.items.len)));
+
+        return .{
+            .idx = idx,
+            .arr = arr,
+        };
+    }
+
+    test newList {
+        const input = [_]comptime_int{ 1, 2, 3, 4, 5 };
+
+        inline for ([_]TAG{ .Byte, .Short, .Int, .Float, .Double }) |tag| {
+            try testList(tag, &input);
+        }
+
+        {
+            const inner = createTest(u8, input);
+            const byteArr: [8][]const u8 = @splat(inner[0..]);
+
+            try testByteArray(&byteArr);
+        }
+
+        {
+            const strArr: [8][]const u8 = @splat("Hello");
+            try testByteArray(&strArr);
+        }
+
+        {
+            const inner = createTest(i8, input);
+            const listArr: [8][]const i8 = @splat(inner[0..]);
+
+            var store = Self.setupTest();
+            defer store.deinit();
+
+            const list = try store.newList(.List, toLen(listArr.len));
+            for (listArr, 0..) |item, i| {
+                const innerArr = try store.newList(.Byte, toLen(item.len));
+                for (item, 0..) |innerItem, j| {
+                    innerArr.arr[j] = try store.addItem(.Byte, innerItem);
+                }
+                list.arr[i] = innerArr.idx;
+            }
+
+            try std.testing.expectEqual(.List, store.tag_store.items[list.idx]);
+
+            const idx = store.idx_store.items[list.idx];
+            const list_idx = store.list_idx.items[idx];
+            const list_len = store.list_len.items[idx];
+            const list_arr = store.idx_store.items[list_idx .. list_idx + list_len];
+
+            for (listArr, 0..) |item, i| {
+                const val_idx = list_arr[i];
+                try std.testing.expectEqual(.List, store.tag_store.items[idx + i]);
+
+                const item_idx = store.idx_store.items[val_idx];
+                const inner_idx = store.list_idx.items[item_idx];
+                const inner_len = store.list_len.items[item_idx];
+                const inner_arr = store.idx_store.items[inner_idx .. inner_idx + inner_len];
+
+                for (item, 0..) |innerItem, j| {
+                    const inner_val_idx = inner_arr[j];
+                    try std.testing.expectEqual(.Byte, store.tag_store.items[inner_idx + j]);
+                    const val = store.byte_store.items[inner_val_idx];
+
+                    try std.testing.expectEqual(innerItem, val);
+                }
+            }
+        }
+    }
+
+    fn createTest(comptime T: type, input: anytype) [input.len]T {
+        var out: [input.len]T = undefined;
+
+        inline for (0..input.len) |i| {
+            out[i] = input[i];
+        }
+
+        return out;
+    }
+
+    fn testList(
+        comptime tag: TAG,
+        input: []const comptime_int,
+    ) !void {
+        var store = Self.setupTest();
+        defer store.deinit();
+
+        const list = try store.newList(tag, input.len);
+        inline for (input, 0..) |item, i| {
+            list.arr[i] = try store.addItem(tag, @as(tag.typeOf(), item));
+        }
+
+        try std.testing.expectEqual(.List, store.tag_store.items[list.idx]);
+
+        const idx = store.idx_store.items[list.idx];
+        const list_idx = store.list_idx.items[idx];
+        const list_len = store.list_len.items[idx];
+        const list_arr = store.idx_store.items[list_idx .. list_idx + list_len];
+
+        inline for (input, 0..) |item, i| {
+            const val_idx = list_arr[i];
+            try std.testing.expectEqual(tag, store.tag_store.items[i]);
+            const val = store.getStore(tag).items[val_idx];
+
+            try std.testing.expectEqual(item, val);
+        }
+    }
+
+    fn testByteArray(byteArr: []const []const u8) !void {
+        var store = Self.setupTest();
+        defer store.deinit();
+
+        const list = try store.newList(.ByteArray, toLen(byteArr.len));
+        for (byteArr, 0..) |item, i| {
+            list.arr[i] = try store.newByteArrayInner(item);
+        }
+
+        try std.testing.expectEqual(.List, store.tag_store.items[list.idx]);
+
+        const idx = store.idx_store.items[list.idx];
+        const list_idx = store.list_idx.items[idx];
+        const list_len = store.list_len.items[idx];
+        const list_arr = store.idx_store.items[list_idx .. list_idx + list_len];
+
+        for (byteArr, 0..) |item, i| {
+            const val_idx = list_arr[i];
+            try std.testing.expectEqual(.ByteArray, store.tag_store.items[i]);
+            const arr_idx = store.byte_array_idx.items[val_idx];
+            const arr_len = store.byte_array_len.items[val_idx];
+            const arr = store.byte_array.items[arr_idx .. arr_idx + arr_len];
+
+            try std.testing.expectEqualSlices(u8, item, arr);
+        }
+    }
+
+    fn convertTestType(comptime T: type) type {
+        const tInfo: std.builtin.Type = @typeInfo(T);
+
+        switch (tInfo) {
+            .int, .float => return T,
+            .pointer => |ptr| {
+                var out = ptr;
+                out.is_const = true;
+
+                return @Type(std.builtin.Type{
+                    .pointer = out,
+                });
+            },
+            else => @compileError("Unsupported type: " ++ @tagName(tInfo)),
+        }
+    }
+
+    pub const CompoundParam = struct {
+        name: []const u8,
+        idx: NodeIndex,
+    };
+
+    pub fn newCompound(self: *Self, params: []const CompoundParam) !NodeIndex {
+        std.debug.assert(self.tag_store.items.len == self.idx_store.items.len);
+        std.debug.assert(self.compound_name.items.len == self.compound_node.items.len);
+        const start_idx = self.compound_name.items.len;
+        const name_arr = try self.compound_name.addManyAsSlice(params.len);
+        const node_arr = try self.compound_node.addManyAsSlice(params.len);
+
+        const name_start_idx = self.name_idx.items.len;
+        const name_idxs = try self.name_idx.addManyAsSlice(params.len);
+        const name_lens = try self.name_len.addManyAsSlice(params.len);
+
+        for (params, 0..) |param, i| {
+            name_idxs[i] = try self.addToByteArray(param.name);
+            name_lens[i] = toLen(param.name.len);
+
+            name_arr[i] = toIdx(name_start_idx + i);
+            node_arr[i] = param.idx;
+        }
+
+        const idx = self.compound_idx.items.len;
+        try self.compound_idx.append(toIdx(start_idx));
+        try self.compound_len.append(toLen(params.len));
+
+        return self.newNode(.Compound, toIdx(idx));
+    }
+
+    test newCompound {
+        var store = setupTest();
+        defer store.deinit();
+
+        const name = try store.newString("Ethan");
+        const age = try store.newByte(22);
+        const rating = try store.newFloat(0.9);
+
+        const params = [_]CompoundParam{
+            CompoundParam{
+                .name = "name",
+                .idx = name,
+            },
+            CompoundParam{
+                .name = "age",
+                .idx = age,
+            },
+            CompoundParam{
+                .name = "rating",
+                .idx = rating,
+            },
+        };
+
+        const idx = try store.newCompound(&params);
+
+        try std.testing.expectEqual(TAG.Compound, store.tag_store.items[idx]);
+        const compound_store_idx = store.idx_store.items[idx];
+        const compound_idx = store.compound_idx.items[compound_store_idx];
+        const compound_len = store.compound_len.items[compound_store_idx];
+        try std.testing.expectEqual(params.len, compound_len);
+
+        const name_arr = store.compound_name.items[compound_idx .. compound_idx + compound_len];
+        const node_arr = store.compound_node.items[compound_idx .. compound_idx + compound_len];
+
+        for (params, 0..) |param, i| {
+            const name_idx = name_arr[i];
+            const name_byte_idx = store.name_idx.items[name_idx];
+            const name_byte_len = store.name_len.items[name_idx];
+
+            const param_name = store.byte_array.items[name_byte_idx .. name_byte_idx + name_byte_len];
+
+            try std.testing.expectEqualStrings(param.name, param_name);
+
+            try std.testing.expectEqual(param.idx, node_arr[i]);
+        }
+    }
+
+    fn newIntArrayInner(self: *Self, arr: []const i32) !NodeIndex {
+        const start = self.int_store.items.len;
+        try self.int_store.appendSlice(arr);
+        const end = self.int_store.items.len;
+        std.debug.assert(end - start == arr.len);
+
+        const idx = try addItemToStore(&self.int_array_idx, toIdx(start));
+        const lenIdx = try addItemToStore(&self.int_array_len, toLen(arr.len));
+        std.debug.assert(idx == lenIdx);
+        return idx;
+    }
+
+    fn newIntArray(self: *Self, arr: []const i32) !NodeIndex {
+        const idx = try self.newIntArrayInner(arr);
+        return self.newNode(.IntArray, idx);
+    }
+
+    test newIntArray {
+        var store = setupTest();
+        defer store.deinit();
+
+        const arr = [_]i32{ 1, 2, 3, 4, 5 };
+
+        const idx = try store.newIntArray(arr[0..]);
+
+        try std.testing.expectEqual(TAG.IntArray, store.tag_store.items[idx]);
+        const arrIdx = store.int_array_idx.items[idx];
+        try std.testing.expectEqual(0, arrIdx);
+        const arrLen = store.int_array_len.items[idx];
+        try std.testing.expectEqual(arr.len, arrLen);
+
+        const gotArr = store.int_store.items[arrIdx..arrLen];
+
+        try std.testing.expectEqualSlices(i32, &arr, gotArr);
+    }
+
+    fn newLongArrayInner(self: *Self, arr: []const i64) !NodeIndex {
+        const start = self.long_store.items.len;
+        try self.long_store.appendSlice(arr);
+        const end = self.long_store.items.len;
+        std.debug.assert(end - start == arr.len);
+
+        const idx = try addItemToStore(&self.long_array_idx, toIdx(start));
+        const lenIdx = try addItemToStore(&self.long_array_len, toLen(arr.len));
+        std.debug.assert(idx == lenIdx);
+        return idx;
+    }
+
+    fn newLongArray(self: *Self, arr: []const i64) !NodeIndex {
+        const idx = try self.newLongArrayInner(arr);
+        return self.newNode(.LongArray, idx);
+    }
+
+    test newLongArray {
+        var store = setupTest();
+        defer store.deinit();
+
+        const arr = [_]i64{ 1, 2, 3, 4, 5 };
+
+        const idx = try store.newLongArray(arr[0..]);
+
+        try std.testing.expectEqual(TAG.LongArray, store.tag_store.items[idx]);
+        const arrIdx = store.long_array_idx.items[idx];
+        try std.testing.expectEqual(0, arrIdx);
+        const arrLen = store.long_array_len.items[idx];
+        try std.testing.expectEqual(arr.len, arrLen);
+
+        const gotArr = store.long_store.items[arrIdx..arrLen];
+
+        try std.testing.expectEqualSlices(i64, &arr, gotArr);
+    }
+
+    fn getStore(self: *Self, comptime tag: TAG) *std.ArrayList(tag.typeOf()) {
+        switch (tag) {
+            .End => @compileError("Not Supported"),
+            .Byte => return &self.byte_store,
+            .Short => return &self.short_store,
+            .Int => return &self.int_store,
+            .Long => return &self.long_store,
+            .Float => return &self.float_store,
+            .Double => return &self.double_store,
+            else => @compileError("Tag not supported: " ++ @tagName(tag)),
+        }
     }
 
     pub fn deinit(self: *Self) void {
@@ -355,13 +868,19 @@ pub const AstStore = struct {
         self.list_len.deinit();
 
         self.compound_idx.deinit();
-        self.compount_len.deinit();
+        self.compound_len.deinit();
 
         self.name_idx.deinit();
         self.name_len.deinit();
 
         self.compound_name.deinit();
-        self.compount_node.deinit();
+        self.compound_node.deinit();
+
+        self.int_array_idx.deinit();
+        self.int_array_len.deinit();
+
+        self.long_array_idx.deinit();
+        self.long_array_len.deinit();
     }
 };
 
