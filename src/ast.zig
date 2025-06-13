@@ -844,6 +844,157 @@ pub const AstStore = struct {
         }
     }
 
+    pub fn getTag(self: *const Self, idx: NodeIndex) TAG {
+        return self.tag_store.items[idx];
+    }
+
+    fn expectEqualSingle(
+        self: *Self,
+        comptime tag: TAG,
+        expected: NodeIndex,
+        actual: NodeIndex,
+    ) !void {
+        const store = self.getStore(tag);
+        const expectedByte = store.items[expected];
+        const actualByte = store.items[actual];
+
+        try std.testing.expectEqual(expectedByte, actualByte);
+    }
+
+    fn getByteArray(self: *const Self, idx: NodeIndex) []const u8 {
+        const arr_idx = self.byte_array_idx.items[idx];
+        const arr_len = self.byte_array_len.items[idx];
+
+        return self.byte_array.items[arr_idx .. arr_idx + arr_len];
+    }
+
+    fn expectNodeEqual(
+        self: *Self,
+        tag: TAG,
+        expected: NodeIndex,
+        actual: NodeIndex,
+    ) !void {
+        switch (tag) {
+            TAG.Byte => {
+                return self.expectEqualSingle(.Byte, expected, actual);
+            },
+            TAG.Short => {
+                return self.expectEqualSingle(.Short, expected, actual);
+            },
+            TAG.Int => {
+                return self.expectEqualSingle(.Int, expected, actual);
+            },
+            TAG.Long => {
+                return self.expectEqualSingle(.Long, expected, actual);
+            },
+            TAG.Float => {
+                return self.expectEqualSingle(.Float, expected, actual);
+            },
+            TAG.Double => {
+                return self.expectEqualSingle(.Double, expected, actual);
+            },
+            TAG.ByteArray => {
+                const expected_arr = self.getByteArray(expected);
+                const actual_arr = self.getByteArray(actual);
+
+                try std.testing.expectEqualSlices(u8, expected_arr, actual_arr);
+            },
+            TAG.String => {
+                const expected_arr = self.getByteArray(expected);
+                const actual_arr = self.getByteArray(actual);
+
+                try std.testing.expectEqualStrings(expected_arr, actual_arr);
+            },
+            else => {
+                unreachable;
+            },
+        }
+    }
+
+    pub fn expectEqualDeep(self: *Self, expected: NodeIndex, actual: NodeIndex) !void {
+        if (expected == actual) {
+            return;
+        }
+
+        const expectedTag = self.getTag(expected);
+        const actualTag = self.getTag(actual);
+
+        if (expectedTag != actualTag) {
+            std.debug.print(
+                \\ Missmatch of tags
+                \\ Expected tag: {}
+                \\ Got tag: {}
+            , .{
+                expectedTag,
+                actualTag,
+            });
+            return error.TagMissmatch;
+        }
+
+        const expectedIdx = self.idx_store.items[expected];
+        const actualIdx = self.idx_store.items[actual];
+
+        if (expectedIdx == actualIdx) {
+            return;
+        }
+
+        return self.expectNodeEqual(expectedTag, expectedIdx, actualIdx);
+    }
+
+    fn checkInt(
+        comptime tag: TAG,
+        val: comptime_int,
+        creator: fn (self: *Self, val: tag.typeOf()) anyerror!NodeIndex,
+    ) !void {
+        var store = setupTest();
+        defer store.deinit();
+
+        const initial = try creator(&store, val);
+        try store.expectEqualDeep(initial, initial);
+
+        const other = try creator(&store, val);
+        try store.expectEqualDeep(initial, other);
+    }
+
+    test expectEqualDeep {
+        inline for (.{
+            .{ TAG.Byte, Self.newByte },
+            .{ TAG.Short, Self.newShort },
+            .{ TAG.Int, Self.newInt },
+            .{ TAG.Long, Self.newLong },
+            .{ TAG.Float, Self.newFloat },
+            .{ TAG.Double, Self.newDouble },
+        }) |value| {
+            try checkInt(value[0], 1, value[1]);
+        }
+
+        {
+            var store = setupTest();
+            defer store.deinit();
+
+            const arr = [_]u8{ 1, 2, 3, 4, 5 };
+
+            const initial = try store.newByteArray(&arr);
+            try store.expectEqualDeep(initial, initial);
+
+            const other = try store.newByteArray(&arr);
+            try store.expectEqualDeep(initial, other);
+        }
+
+        {
+            var store = setupTest();
+            defer store.deinit();
+
+            const arr = "Hello World";
+
+            const initial = try store.newString(arr);
+            try store.expectEqualDeep(initial, initial);
+
+            const other = try store.newString(arr);
+            try store.expectEqualDeep(initial, other);
+        }
+    }
+
     pub fn deinit(self: *Self) void {
         self.tag_store.deinit();
         self.idx_store.deinit();
