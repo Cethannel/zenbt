@@ -7,14 +7,15 @@ const TAG = ast.TAG;
 const native_endian = @import("builtin").target.cpu.arch.endian();
 
 pub const Parser = struct {
-    arena: std.heap.ArenaAllocator,
+    arena: *std.heap.ArenaAllocator,
     allocator: std.mem.Allocator,
     store: ast.AstStore,
 
     const Self = @This();
 
-    pub fn init(child_allocator: std.mem.Allocator) Self {
-        const arena = std.heap.ArenaAllocator.init(child_allocator);
+    pub fn init(child_allocator: std.mem.Allocator) !Self {
+        const arena = try child_allocator.create(std.heap.ArenaAllocator);
+        arena.* = .init(child_allocator);
         const allocator = arena.allocator();
 
         return Self{
@@ -36,14 +37,14 @@ pub const Parser = struct {
         return short;
     }
 
-    pub fn parseAssumeString(self: *Self, reader: anytype) !AstStore.NodeIndex {
+    fn parseAssumeString(self: *Self, reader: anytype) !AstStore.NodeIndex {
         const len = try parseAssumeShort(reader);
 
-        if (len.Short < 0) {
+        if (len < 0) {
             return error.NegativeLength;
         }
 
-        const ulen: usize = @intCast(len.Short);
+        const ulen: usize = @intCast(len);
 
         var str = try self.allocator.alloc(u8, ulen);
         defer self.allocator.free(str);
@@ -64,16 +65,23 @@ pub const Parser = struct {
         const input = [_]u8{@intFromEnum(TAG.String)} //
             ++ comptime intToBytesBigEndian(@as(i16, str.len)) ++ str;
         var stream = std.io.fixedBufferStream(input);
-        const out = try parseString(stream.reader(), alloc);
-        defer alloc.free(out.String);
-        const expected = Node{
-            .String = str[0..],
-        };
-        try std.testing.expectEqualDeep(expected, out);
+        var parser = try Self.init(alloc);
+        defer parser.deinit();
+        const out = try parser.parseString(stream.reader());
+        const expected = try parser.store.newString(str);
+        try parser.store.expectEqualDeep(expected, out);
     }
+
+    pub fn parseFromReader(self: *Self, reader: anytype) !AstStore.NodeIndex {}
+
+    fn parseNamedTag(
+        self: *Self,
+        reader: anytype,
+    ) !AstStore.NodeIndex {}
 
     pub fn deinit(self: *Self) void {
         self.arena.deinit();
+        self.arena.child_allocator.destroy(self.arena);
     }
 };
 

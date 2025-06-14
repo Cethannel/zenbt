@@ -136,7 +136,10 @@ test "Round trip test" {
     defer allocator.free(out);
     try std.testing.expectEqualSlices(u8, servers, out);
 
+    const store_parser = @import("store_parser.zig");
+
     std.testing.refAllDecls(ast);
+    std.testing.refAllDecls(store_parser);
 }
 
 pub fn serializeStringNoTag(

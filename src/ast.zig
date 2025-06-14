@@ -1033,6 +1033,11 @@ pub const AstStore = struct {
         self.long_array_idx.deinit();
         self.long_array_len.deinit();
     }
+
+    pub const NamedTag = struct {
+        idx: NodeIndex,
+        name_idx: NodeIndex,
+    };
 };
 
 pub const Node = union(TAG) {
