@@ -212,13 +212,15 @@ pub const AstStore = struct {
     long_array_idx: std.ArrayList(NodeIndex),
     long_array_len: std.ArrayList(NodeLen),
 
+    end_named_tag: Self.NamedTag,
+
     pub const NodeIndex = u16;
     pub const NodeLen = u16;
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator) Self {
-        return Self{
+    pub fn init(allocator: std.mem.Allocator) !Self {
+        var out = Self{
             .allocator = allocator,
             .tag_store = .init(allocator),
             .idx_store = .init(allocator),
@@ -256,7 +258,21 @@ pub const AstStore = struct {
 
             .long_array_idx = .init(allocator),
             .long_array_len = .init(allocator),
+
+            .end_named_tag = undefined,
         };
+
+        const end_idx = try out.newNode(.End, 0);
+
+        std.debug.assert(end_idx == 0);
+
+        out.end_named_tag = try out.newNamedTag("end", end_idx);
+
+        return out;
+    }
+
+    pub fn isEndTag(self: *const Self, idx: NodeIndex) bool {
+        return self.tag_store.items[idx] == .End;
     }
 
     pub fn newNode(self: *Self, tag: TAG, idx: NodeIndex) !NodeIndex {
@@ -340,7 +356,7 @@ pub const AstStore = struct {
 
     test newFloat {
         const allocator = std.testing.allocator;
-        var store = Self.init(allocator);
+        var store = try Self.init(allocator);
         defer store.deinit();
 
         const idx = try store.newFloat(1.0);
@@ -351,7 +367,7 @@ pub const AstStore = struct {
 
     fn setupTest() Self {
         const allocator = std.testing.allocator;
-        return Self.init(allocator);
+        return Self.init(allocator) catch unreachable;
     }
 
     pub fn addItem(
@@ -386,7 +402,7 @@ pub const AstStore = struct {
 
     test newDouble {
         const allocator = std.testing.allocator;
-        var store = Self.init(allocator);
+        var store = try Self.init(allocator);
         defer store.deinit();
 
         const idx = try store.newDouble(1.0);
@@ -463,9 +479,11 @@ pub const AstStore = struct {
         const idx = try store.newByteArray(arr[0..]);
 
         try std.testing.expectEqual(TAG.ByteArray, store.tag_store.items[idx]);
-        const arrIdx = store.byte_array_idx.items[idx];
+
+        const byte_idx = store.idx_store.items[idx];
+        const arrIdx = store.byte_array_idx.items[byte_idx];
         try std.testing.expectEqual(0, arrIdx);
-        const arrLen = store.byte_array_len.items[idx];
+        const arrLen = store.byte_array_len.items[byte_idx];
         try std.testing.expectEqual(arr.len, arrLen);
 
         const gotArr = store.byte_array.items[arrIdx..arrLen];
@@ -488,9 +506,10 @@ pub const AstStore = struct {
         const idx = try store.newByteArray(arr[0..]);
 
         try std.testing.expectEqual(TAG.ByteArray, store.tag_store.items[idx]);
-        const arrIdx = store.byte_array_idx.items[idx];
+        const byte_idx = store.idx_store.items[idx];
+        const arrIdx = store.byte_array_idx.items[byte_idx];
         try std.testing.expectEqual(0, arrIdx);
-        const arrLen = store.byte_array_len.items[idx];
+        const arrLen = store.byte_array_len.items[byte_idx];
         try std.testing.expectEqual(arr.len, arrLen);
 
         const gotArr = store.byte_array.items[arrIdx..arrLen];
@@ -581,7 +600,10 @@ pub const AstStore = struct {
 
             for (listArr, 0..) |item, i| {
                 const val_idx = list_arr[i];
-                try std.testing.expectEqual(.List, store.tag_store.items[idx + i]);
+                try std.testing.expectEqual(
+                    .List,
+                    store.tag_store.items[list_idx + i],
+                );
 
                 const item_idx = store.idx_store.items[val_idx];
                 const inner_idx = store.list_idx.items[item_idx];
@@ -630,7 +652,10 @@ pub const AstStore = struct {
 
         inline for (input, 0..) |item, i| {
             const val_idx = list_arr[i];
-            try std.testing.expectEqual(tag, store.tag_store.items[i]);
+            try std.testing.expectEqual(
+                tag,
+                store.tag_store.items[list_idx + i],
+            );
             const val = store.getStore(tag).items[val_idx];
 
             try std.testing.expectEqual(item, val);
@@ -655,7 +680,10 @@ pub const AstStore = struct {
 
         for (byteArr, 0..) |item, i| {
             const val_idx = list_arr[i];
-            try std.testing.expectEqual(.ByteArray, store.tag_store.items[i]);
+            try std.testing.expectEqual(
+                .ByteArray,
+                store.tag_store.items[list_idx + i],
+            );
             const arr_idx = store.byte_array_idx.items[val_idx];
             const arr_len = store.byte_array_len.items[val_idx];
             const arr = store.byte_array.items[arr_idx .. arr_idx + arr_len];
@@ -708,6 +736,19 @@ pub const AstStore = struct {
         const idx = self.compound_idx.items.len;
         try self.compound_idx.append(toIdx(start_idx));
         try self.compound_len.append(toLen(params.len));
+
+        return self.newNode(.Compound, toIdx(idx));
+    }
+
+    pub fn newCompoundFromTags(
+        self: *Self,
+        namedTags: []const Self.NamedTag,
+    ) !NodeIndex {
+        const start_idx = self.compound_name.items.len;
+
+        const idx = self.compound_idx.items.len;
+        try self.compound_idx.append(toIdx(start_idx));
+        try self.compound_len.append(toLen(namedTags.len));
 
         return self.newNode(.Compound, toIdx(idx));
     }
@@ -785,9 +826,10 @@ pub const AstStore = struct {
         const idx = try store.newIntArray(arr[0..]);
 
         try std.testing.expectEqual(TAG.IntArray, store.tag_store.items[idx]);
-        const arrIdx = store.int_array_idx.items[idx];
+        const node_idx = store.idx_store.items[idx];
+        const arrIdx = store.int_array_idx.items[node_idx];
         try std.testing.expectEqual(0, arrIdx);
-        const arrLen = store.int_array_len.items[idx];
+        const arrLen = store.int_array_len.items[node_idx];
         try std.testing.expectEqual(arr.len, arrLen);
 
         const gotArr = store.int_store.items[arrIdx..arrLen];
@@ -821,9 +863,10 @@ pub const AstStore = struct {
         const idx = try store.newLongArray(arr[0..]);
 
         try std.testing.expectEqual(TAG.LongArray, store.tag_store.items[idx]);
-        const arrIdx = store.long_array_idx.items[idx];
+        const node_idx = store.idx_store.items[idx];
+        const arrIdx = store.long_array_idx.items[node_idx];
         try std.testing.expectEqual(0, arrIdx);
-        const arrLen = store.long_array_len.items[idx];
+        const arrLen = store.long_array_len.items[node_idx];
         try std.testing.expectEqual(arr.len, arrLen);
 
         const gotArr = store.long_store.items[arrIdx..arrLen];
@@ -1038,6 +1081,23 @@ pub const AstStore = struct {
         idx: NodeIndex,
         name_idx: NodeIndex,
     };
+
+    pub fn newNamedTag(
+        self: *Self,
+        name: []const u8,
+        idx: NodeIndex,
+    ) !Self.NamedTag {
+        const name_idx = try self.newString(name);
+        return Self.NamedTag{
+            .idx = idx,
+            .name_idx = name_idx,
+        };
+    }
+
+    pub fn newEndTag(self: *const Self) NodeIndex {
+        _ = self;
+        return 0;
+    }
 };
 
 pub const Node = union(TAG) {

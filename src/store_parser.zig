@@ -21,8 +21,16 @@ pub const Parser = struct {
         return Self{
             .arena = arena,
             .allocator = allocator,
-            .store = .init(allocator),
+            .store = try .init(allocator),
         };
+    }
+
+    pub fn parseFromBytes(
+        self: *Self,
+        input: []const u8,
+    ) !AstStore.NamedTag {
+        var stream = std.io.fixedBufferStream(input);
+        return self.parseFromReader(stream.reader());
     }
 
     fn checkConsumeTag(reader: anytype, expectedTag: TAG) !void {
@@ -32,13 +40,20 @@ pub const Parser = struct {
         }
     }
 
-    fn parseAssumeShort(reader: anytype) !i16 {
+    fn parseAssumeShort(self: *Self, reader: anytype) !i16 {
+        _ = self;
         const short = try readTBigEndian(i16, reader);
         return short;
     }
 
+    fn parseAssumeByte(self: *Self, reader: anytype) !i8 {
+        _ = self;
+        const byte = try readTBigEndian(i8, reader);
+        return byte;
+    }
+
     fn parseAssumeString(self: *Self, reader: anytype) !AstStore.NodeIndex {
-        const len = try parseAssumeShort(reader);
+        const len = try self.parseAssumeShort(reader);
 
         if (len < 0) {
             return error.NegativeLength;
@@ -72,12 +87,113 @@ pub const Parser = struct {
         try parser.store.expectEqualDeep(expected, out);
     }
 
-    pub fn parseFromReader(self: *Self, reader: anytype) !AstStore.NodeIndex {}
+    pub fn parseFromReader(
+        self: *Self,
+        reader: anytype,
+    ) !AstStore.NamedTag {
+        return self.parseNamedTag(reader);
+    }
 
     fn parseNamedTag(
         self: *Self,
         reader: anytype,
-    ) !AstStore.NodeIndex {}
+    ) !AstStore.NamedTag {
+        const tagByte: u8 = try reader.readByte();
+
+        const tag = std.meta.intToEnum(TAG, tagByte) catch |err| {
+            return err;
+        };
+
+        if (tag == .End) {
+            return self.store.end_named_tag;
+        }
+
+        const name = try self.parseAssumeString(reader);
+
+        const idx = try self.parseNodeWithTag(reader, tag);
+
+        return .{
+            .idx = idx,
+            .name_idx = name,
+        };
+    }
+
+    fn parseNodeWithTag(
+        self: *Self,
+        reader: anytype,
+        tag: TAG,
+    ) !AstStore.NodeIndex {
+        switch (tag) {
+            TAG.Byte => {
+                return self.store.newByte(
+                    try self.parseAssumeByte(reader),
+                );
+            },
+            TAG.Short => {
+                return self.store.newShort(
+                    try self.parseAssumeShort(reader),
+                );
+            },
+            TAG.Compound => {
+                return self.parseAssumeCompound(reader);
+            },
+            TAG.List => {
+                return self.parseAssumeList(reader);
+            },
+            else => {
+                std.debug.panic("Unsupported tag: {}", .{tag});
+            },
+        }
+    }
+
+    fn parseAssumeList(
+        self: *Self,
+        reader: anytype,
+    ) !AstStore.NodeIndex {
+        const listTagByte: u8 = try reader.readByte();
+        const listTag = try std.meta.intToEnum(TAG, listTagByte);
+        const len = try parseAssumeInt(reader);
+
+        const uLen: usize = @intCast(len);
+
+        var items = try std.ArrayList(AstStore.NodeIndex).initCapacity(
+            self.allocator,
+            uLen,
+        );
+        defer items.deinit();
+
+        for (0..uLen) |_| {
+            items.appendAssumeCapacity(
+                try self.parseNodeWithTag(reader, listTag),
+            );
+        }
+
+        return self.store.newList(comptime tag: TAG, len: u16)
+    }
+
+    fn parseAssumeInt(
+        self: *Self,
+        reader: anytype,
+    ) !i32 {
+        _ = self;
+        const int = try readTBigEndian(i32, reader);
+        return int;
+    }
+
+    fn parseAssumeCompound(
+        self: *Self,
+        reader: anytype,
+    ) anyerror!AstStore.NodeIndex {
+        var namedTags = std.ArrayList(AstStore.NamedTag).init(self.allocator);
+        defer namedTags.deinit();
+
+        var namedTag = try self.parseNamedTag(reader);
+        while (!self.store.isEndTag(namedTag.idx)) : (namedTag = try parseNamedTag(self, reader)) {
+            try namedTags.append(namedTag);
+        }
+
+        return self.store.newCompoundFromTags(namedTags.items);
+    }
 
     pub fn deinit(self: *Self) void {
         self.arena.deinit();
@@ -124,4 +240,17 @@ fn intToBytesBigEndian(input: anytype) [@sizeOf(@TypeOf(input))]u8 {
     }
 
     return std.mem.toBytes(swappedInput);
+}
+
+test "Servers.dat" {
+    const allocator = std.testing.allocator;
+    const servers = @embedFile("./testFiles/servers.dat");
+    var arenaAlloc = std.heap.ArenaAllocator.init(allocator);
+    defer arenaAlloc.deinit();
+    var parser = try Parser.init(allocator);
+    defer parser.deinit();
+    const nt = try parser.parseFromBytes(
+        servers,
+    );
+    _ = nt;
 }
