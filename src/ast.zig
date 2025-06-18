@@ -214,7 +214,7 @@ pub const AstStore = struct {
 
     end_named_tag: Self.NamedTag,
 
-    pub const NodeIndex = u16;
+    pub const NodeIndex = u32;
     pub const NodeLen = u16;
 
     const Self = @This();
@@ -281,6 +281,7 @@ pub const AstStore = struct {
 
         std.debug.assert(self.tag_store.items.len == self.idx_store.items.len);
         const out_idx = self.tag_store.items.len - 1;
+        std.debug.assert(out_idx < 100000);
 
         return @intCast(out_idx);
     }
@@ -482,11 +483,10 @@ pub const AstStore = struct {
 
         const byte_idx = store.idx_store.items[idx];
         const arrIdx = store.byte_array_idx.items[byte_idx];
-        try std.testing.expectEqual(0, arrIdx);
         const arrLen = store.byte_array_len.items[byte_idx];
         try std.testing.expectEqual(arr.len, arrLen);
 
-        const gotArr = store.byte_array.items[arrIdx..arrLen];
+        const gotArr = store.byte_array.items[arrIdx .. arrIdx + arrLen];
 
         try std.testing.expectEqualSlices(u8, &arr, gotArr);
     }
@@ -508,11 +508,10 @@ pub const AstStore = struct {
         try std.testing.expectEqual(TAG.ByteArray, store.tag_store.items[idx]);
         const byte_idx = store.idx_store.items[idx];
         const arrIdx = store.byte_array_idx.items[byte_idx];
-        try std.testing.expectEqual(0, arrIdx);
         const arrLen = store.byte_array_len.items[byte_idx];
         try std.testing.expectEqual(arr.len, arrLen);
 
-        const gotArr = store.byte_array.items[arrIdx..arrLen];
+        const gotArr = store.byte_array.items[arrIdx .. arrIdx + arrLen];
 
         try std.testing.expectEqualSlices(u8, arr, gotArr);
     }
@@ -531,12 +530,13 @@ pub const AstStore = struct {
         std.debug.print("}}", .{});
     }
 
-    pub fn newList(self: *Self, comptime tag: TAG, len: u16) !struct {
+    pub fn addList(self: *Self, tag: TAG, len: u16) !struct {
         idx: NodeIndex,
         arr: []NodeIndex,
     } {
         std.debug.assert(self.tag_store.items.len == self.idx_store.items.len);
         const start_idx = self.idx_store.items.len;
+        std.debug.print("Start: {}\n", .{start_idx});
         const arr = try self.idx_store.addManyAsSlice(@intCast(len));
         errdefer {
             self.idx_store.items = self.idx_store.items[0..start_idx];
@@ -546,13 +546,24 @@ pub const AstStore = struct {
         const list_idx = try addItemToStore(&self.list_idx, toIdx(start_idx));
         try self.list_len.append(len);
 
-        const idx = try self.newNode(.List, list_idx);
+        return .{
+            .idx = list_idx,
+            .arr = arr,
+        };
+    }
 
-        utils.assertEq(idx + 1, @as(u16, @intCast(self.idx_store.items.len)));
+    pub fn newList(self: *Self, tag: TAG, len: u16) !struct {
+        idx: NodeIndex,
+        arr: []NodeIndex,
+    } {
+        const arr = try self.addList(tag, len);
+        const idx = try self.newNode(.List, arr.idx);
+
+        utils.assertEq(idx + 1, @as(u32, @intCast(self.idx_store.items.len)));
 
         return .{
             .idx = idx,
-            .arr = arr,
+            .arr = arr.arr,
         };
     }
 
@@ -583,12 +594,16 @@ pub const AstStore = struct {
             defer store.deinit();
 
             const list = try store.newList(.List, toLen(listArr.len));
+            try std.testing.expectEqual(listArr.len, list.arr.len);
             for (listArr, 0..) |item, i| {
-                const innerArr = try store.newList(.Byte, toLen(item.len));
+                const innerArr = try store.addList(.Byte, toLen(item.len));
+                try std.testing.expectEqual(item.len, innerArr.arr.len);
                 for (item, 0..) |innerItem, j| {
                     innerArr.arr[j] = try store.addItem(.Byte, innerItem);
+                    std.debug.print("   J: {} -> {}\n", .{ j, innerArr.arr[j] });
                 }
                 list.arr[i] = innerArr.idx;
+                std.debug.print("I: {} -> {}\n", .{ i, innerArr.idx });
             }
 
             try std.testing.expectEqual(.List, store.tag_store.items[list.idx]);
@@ -597,15 +612,16 @@ pub const AstStore = struct {
             const list_idx = store.list_idx.items[idx];
             const list_len = store.list_len.items[idx];
             const list_arr = store.idx_store.items[list_idx .. list_idx + list_len];
+            std.debug.print("Rest arr: {any}", .{store.idx_store.items[list_idx..]});
 
             for (listArr, 0..) |item, i| {
-                const val_idx = list_arr[i];
+                std.debug.print("List arr: {any}", .{list_arr});
+                const item_idx = list_arr[i];
                 try std.testing.expectEqual(
                     .List,
                     store.tag_store.items[list_idx + i],
                 );
 
-                const item_idx = store.idx_store.items[val_idx];
                 const inner_idx = store.list_idx.items[item_idx];
                 const inner_len = store.list_len.items[item_idx];
                 const inner_arr = store.idx_store.items[inner_idx .. inner_idx + inner_len];
@@ -740,7 +756,7 @@ pub const AstStore = struct {
         return self.newNode(.Compound, toIdx(idx));
     }
 
-    pub fn newCompoundFromTags(
+    pub fn allocCompoundFromTags(
         self: *Self,
         namedTags: []const Self.NamedTag,
     ) !NodeIndex {
@@ -750,7 +766,14 @@ pub const AstStore = struct {
         try self.compound_idx.append(toIdx(start_idx));
         try self.compound_len.append(toLen(namedTags.len));
 
-        return self.newNode(.Compound, toIdx(idx));
+        return toIdx(idx);
+    }
+
+    pub fn newCompoundFromTags(
+        self: *Self,
+        namedTags: []const Self.NamedTag,
+    ) !NodeIndex {
+        return self.newNode(.Compound, try self.allocCompoundFromTags(namedTags));
     }
 
     test newCompound {
@@ -812,7 +835,7 @@ pub const AstStore = struct {
         return idx;
     }
 
-    fn newIntArray(self: *Self, arr: []const i32) !NodeIndex {
+    pub fn newIntArray(self: *Self, arr: []const i32) !NodeIndex {
         const idx = try self.newIntArrayInner(arr);
         return self.newNode(.IntArray, idx);
     }

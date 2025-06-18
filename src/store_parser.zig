@@ -134,16 +134,52 @@ pub const Parser = struct {
                     try self.parseAssumeShort(reader),
                 );
             },
+            TAG.Int => {
+                return self.store.newInt(
+                    try self.parseAssumeInt(reader),
+                );
+            },
+            TAG.Long => {
+                return self.store.newLong(
+                    try self.parseAssumeLong(reader),
+                );
+            },
+            TAG.Double => {
+                return self.store.newDouble(
+                    try self.parseAssumeDouble(reader),
+                );
+            },
             TAG.Compound => {
                 return self.parseAssumeCompound(reader);
             },
             TAG.List => {
                 return self.parseAssumeList(reader);
             },
+            TAG.IntArray => {
+                return self.parseAssumeIntArray(reader);
+            },
+            TAG.String => {
+                return self.parseAssumeString(reader);
+            },
             else => {
                 std.debug.panic("Unsupported tag: {}", .{tag});
             },
         }
+    }
+
+    fn parseAssumeIntArray(
+        self: *Self,
+        reader: anytype,
+    ) !AstStore.NodeIndex {
+        const len = try self.parseAssumeInt(reader);
+        const uLen: usize = @intCast(len);
+        var arr = try self.allocator.alloc(i32, uLen);
+        errdefer self.allocator.free(arr);
+        for (0..uLen) |i| {
+            arr[i] = try self.parseAssumeInt(reader);
+        }
+
+        return self.store.newIntArray(arr);
     }
 
     fn parseAssumeList(
@@ -152,23 +188,17 @@ pub const Parser = struct {
     ) !AstStore.NodeIndex {
         const listTagByte: u8 = try reader.readByte();
         const listTag = try std.meta.intToEnum(TAG, listTagByte);
-        const len = try parseAssumeInt(reader);
+        const len = try self.parseAssumeInt(reader);
 
         const uLen: usize = @intCast(len);
 
-        var items = try std.ArrayList(AstStore.NodeIndex).initCapacity(
-            self.allocator,
-            uLen,
-        );
-        defer items.deinit();
+        const out = try self.store.newList(listTag, @intCast(len));
 
-        for (0..uLen) |_| {
-            items.appendAssumeCapacity(
-                try self.parseNodeWithTag(reader, listTag),
-            );
+        for (0..uLen) |i| {
+            out.arr[i] = try self.parseNodeWithTag(reader, listTag);
         }
 
-        return self.store.newList(comptime tag: TAG, len: u16)
+        return out.idx;
     }
 
     fn parseAssumeInt(
@@ -177,6 +207,24 @@ pub const Parser = struct {
     ) !i32 {
         _ = self;
         const int = try readTBigEndian(i32, reader);
+        return int;
+    }
+
+    fn parseAssumeLong(
+        self: *Self,
+        reader: anytype,
+    ) !i64 {
+        _ = self;
+        const int = try readTBigEndian(i64, reader);
+        return int;
+    }
+
+    fn parseAssumeDouble(
+        self: *Self,
+        reader: anytype,
+    ) !f64 {
+        _ = self;
+        const int = try readTBigEndian(f64, reader);
         return int;
     }
 
@@ -251,6 +299,25 @@ test "Servers.dat" {
     defer parser.deinit();
     const nt = try parser.parseFromBytes(
         servers,
+    );
+    _ = nt;
+}
+
+test "GTNH.dat" {
+    const allocator = std.testing.allocator;
+    const servers = @embedFile("./testFiles/GTNH_level.dat");
+    var arenaAlloc = std.heap.ArenaAllocator.init(allocator);
+    defer arenaAlloc.deinit();
+
+    var stream = std.io.fixedBufferStream(servers);
+
+    var decompressedData = std.ArrayList(u8).init(allocator);
+    defer decompressedData.deinit();
+    try std.compress.gzip.decompress(stream.reader(), decompressedData.writer());
+    var parser = try Parser.init(allocator);
+    defer parser.deinit();
+    const nt = try parser.parseFromBytes(
+        decompressedData.items,
     );
     _ = nt;
 }
