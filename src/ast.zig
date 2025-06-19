@@ -536,7 +536,7 @@ pub const AstStore = struct {
     } {
         std.debug.assert(self.tag_store.items.len == self.idx_store.items.len);
         const start_idx = self.idx_store.items.len;
-        std.debug.print("Start: {}\n", .{start_idx});
+        std.debug.print("Adding list from: {}\n", .{start_idx});
         const arr = try self.idx_store.addManyAsSlice(@intCast(len));
         errdefer {
             self.idx_store.items = self.idx_store.items[0..start_idx];
