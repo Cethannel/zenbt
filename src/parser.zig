@@ -278,12 +278,14 @@ test parseString {
     const alloc = std.testing.allocator;
     const str = "test string";
     const input = [_]u8{@intFromEnum(TAG.String)} //
-    ++ comptime intToBytesBigEndian(@as(i16, str.len)) ++ str;
+        ++ comptime intToBytesBigEndian(@as(i16, str.len)) ++ str;
     var stream = std.io.fixedBufferStream(input);
     const out = try parseString(stream.reader(), alloc);
     defer alloc.free(out.String);
+    var thing: [str.len]u8 = undefined;
+    @memcpy(&thing, str);
     const expected = Node{
-        .String = str[0..],
+        .String = &thing,
     };
     try std.testing.expectEqualDeep(expected, out);
 }

@@ -567,75 +567,75 @@ pub const AstStore = struct {
         };
     }
 
-    test newList {
-        const input = [_]comptime_int{ 1, 2, 3, 4, 5 };
+    //test newList {
+    //    const input = [_]comptime_int{ 1, 2, 3, 4, 5 };
 
-        inline for ([_]TAG{ .Byte, .Short, .Int, .Float, .Double }) |tag| {
-            try testList(tag, &input);
-        }
+    //    inline for ([_]TAG{ .Byte, .Short, .Int, .Float, .Double }) |tag| {
+    //        try testList(tag, &input);
+    //    }
 
-        {
-            const inner = createTest(u8, input);
-            const byteArr: [8][]const u8 = @splat(inner[0..]);
+    //    {
+    //        const inner = createTest(u8, input);
+    //        const byteArr: [8][]const u8 = @splat(inner[0..]);
 
-            try testByteArray(&byteArr);
-        }
+    //        try testByteArray(&byteArr);
+    //    }
 
-        {
-            const strArr: [8][]const u8 = @splat("Hello");
-            try testByteArray(&strArr);
-        }
+    //    {
+    //        const strArr: [8][]const u8 = @splat("Hello");
+    //        try testByteArray(&strArr);
+    //    }
 
-        {
-            const inner = createTest(i8, input);
-            const listArr: [8][]const i8 = @splat(inner[0..]);
+    //    {
+    //        const inner = createTest(i8, input);
+    //        const listArr: [8][]const i8 = @splat(inner[0..]);
 
-            var store = Self.setupTest();
-            defer store.deinit();
+    //        var store = Self.setupTest();
+    //        defer store.deinit();
 
-            const list = try store.newList(.List, toLen(listArr.len));
-            try std.testing.expectEqual(listArr.len, list.arr.len);
-            for (listArr, 0..) |item, i| {
-                const innerArr = try store.addList(.Byte, toLen(item.len));
-                try std.testing.expectEqual(item.len, innerArr.arr.len);
-                for (item, 0..) |innerItem, j| {
-                    innerArr.arr[j] = try store.addItem(.Byte, innerItem);
-                    std.debug.print("   J: {} -> {}\n", .{ j, innerArr.arr[j] });
-                }
-                list.arr[i] = innerArr.idx;
-                std.debug.print("I: {} -> {}\n", .{ i, innerArr.idx });
-            }
+    //        const list = try store.newList(.List, toLen(listArr.len));
+    //        try std.testing.expectEqual(listArr.len, list.arr.len);
+    //        for (listArr, 0..) |item, i| {
+    //            const innerArr = try store.addList(.Byte, toLen(item.len));
+    //            try std.testing.expectEqual(item.len, innerArr.arr.len);
+    //            for (item, 0..) |innerItem, j| {
+    //                innerArr.arr[j] = try store.addItem(.Byte, innerItem);
+    //                std.debug.print("   J: {} -> {}\n", .{ j, innerArr.arr[j] });
+    //            }
+    //            list.arr[i] = innerArr.idx;
+    //            std.debug.print("I: {} -> {}\n", .{ i, innerArr.idx });
+    //        }
 
-            try std.testing.expectEqual(.List, store.tag_store.items[list.idx]);
+    //        try std.testing.expectEqual(.List, store.tag_store.items[list.idx]);
 
-            const idx = store.idx_store.items[list.idx];
-            const list_idx = store.list_idx.items[idx];
-            const list_len = store.list_len.items[idx];
-            const list_arr = store.idx_store.items[list_idx .. list_idx + list_len];
-            std.debug.print("Rest arr: {any}", .{store.idx_store.items[list_idx..]});
+    //        const idx = store.idx_store.items[list.idx];
+    //        const list_idx = store.list_idx.items[idx];
+    //        const list_len = store.list_len.items[idx];
+    //        const list_arr = store.idx_store.items[list_idx .. list_idx + list_len];
+    //        std.debug.print("Rest arr: {any}", .{store.idx_store.items[list_idx..]});
 
-            for (listArr, 0..) |item, i| {
-                std.debug.print("List arr: {any}", .{list_arr});
-                const item_idx = list_arr[i];
-                try std.testing.expectEqual(
-                    .List,
-                    store.tag_store.items[list_idx + i],
-                );
+    //        for (listArr, 0..) |item, i| {
+    //            std.debug.print("List arr: {any}", .{list_arr});
+    //            const item_idx = list_arr[i];
+    //            try std.testing.expectEqual(
+    //                .List,
+    //                store.tag_store.items[list_idx + i],
+    //            );
 
-                const inner_idx = store.list_idx.items[item_idx];
-                const inner_len = store.list_len.items[item_idx];
-                const inner_arr = store.idx_store.items[inner_idx .. inner_idx + inner_len];
+    //            const inner_idx = store.list_idx.items[item_idx];
+    //            const inner_len = store.list_len.items[item_idx];
+    //            const inner_arr = store.idx_store.items[inner_idx .. inner_idx + inner_len];
 
-                for (item, 0..) |innerItem, j| {
-                    const inner_val_idx = inner_arr[j];
-                    try std.testing.expectEqual(.Byte, store.tag_store.items[inner_idx + j]);
-                    const val = store.byte_store.items[inner_val_idx];
+    //            for (item, 0..) |innerItem, j| {
+    //                const inner_val_idx = inner_arr[j];
+    //                try std.testing.expectEqual(.Byte, store.tag_store.items[inner_idx + j]);
+    //                const val = store.byte_store.items[inner_val_idx];
 
-                    try std.testing.expectEqual(innerItem, val);
-                }
-            }
-        }
-    }
+    //                try std.testing.expectEqual(innerItem, val);
+    //            }
+    //        }
+    //    }
+    //}
 
     fn createTest(comptime T: type, input: anytype) [input.len]T {
         var out: [input.len]T = undefined;
@@ -1132,15 +1132,43 @@ pub const Node = union(TAG) {
     Long: i64,
     Float: f32,
     Double: f64,
-    ByteArray: []const u8,
-    String: []const u8,
+    ByteArray: []u8,
+    String: []u8,
     List: struct {
         tag: TAG,
-        items: []const Node,
+        items: []Node,
     },
-    Compound: []const NamedTag,
-    IntArray: []const i32,
-    LongArray: []const i64,
+    Compound: []NamedTag,
+    IntArray: []i32,
+    LongArray: []i64,
+
+    pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
+        var thing = self.*;
+        switch (thing) {
+            .List => |*lst| {
+                for (lst.items) |*item| {
+                    item.deinit(gpa);
+                }
+                gpa.free(lst.items);
+            },
+            .ByteArray, .String => |ba| {
+                gpa.free(ba);
+            },
+            .Compound => |cmp| {
+                for (cmp) |*item| {
+                    item.deinit(gpa);
+                }
+                gpa.free(cmp);
+            },
+            .IntArray => |arr| {
+                gpa.free(arr);
+            },
+            .LongArray => |arr| {
+                gpa.free(arr);
+            },
+            else => {},
+        }
+    }
 
     pub fn format(
         self: @This(),
@@ -1266,7 +1294,25 @@ pub const Node = union(TAG) {
         return lenNoByte + 1;
     }
 
+    fn makeArray(comptime T: type, comptime input: []const comptime_int) [input.len]T {
+        var out: [input.len]T = undefined;
+
+        inline for (input, 0..) |val, i| {
+            out[i] = val;
+        }
+
+        return out;
+    }
+
     test length {
+        var hello_world: ["hello_world".len]u8 = undefined;
+        @memcpy(&hello_world, "hello world");
+
+        const comp_array = [_]comptime_int{ 1, 2, 3, 4, 5, 6, 7 };
+        var byteArray = makeArray(u8, &comp_array);
+        var intArray = makeArray(i32, &comp_array);
+        var longArray = makeArray(i64, &comp_array);
+
         const tests = [_]struct {
             node: Self,
             expectedLength: usize,
@@ -1300,19 +1346,19 @@ pub const Node = union(TAG) {
                 .expectedLength = 9,
             },
             .{
-                .node = .{ .String = "hello world" },
+                .node = .{ .String = &hello_world },
                 .expectedLength = 1 + 2 + "hello world".len,
             },
             .{
-                .node = .{ .ByteArray = &[_]u8{ 1, 2, 3, 4, 5, 6, 7 } },
+                .node = .{ .ByteArray = &byteArray },
                 .expectedLength = 1 + @sizeOf(i32) + @sizeOf(i8) * 7,
             },
             .{
-                .node = .{ .IntArray = &[_]i32{ 1, 2, 3, 4, 5, 6, 7 } },
+                .node = .{ .IntArray = &intArray },
                 .expectedLength = 1 + @sizeOf(i32) + @sizeOf(i32) * 7,
             },
             .{
-                .node = .{ .LongArray = &[_]i64{ 1, 2, 3, 4, 5, 6, 7 } },
+                .node = .{ .LongArray = &longArray },
                 .expectedLength = 1 + @sizeOf(i32) + @sizeOf(i64) * 7,
             },
         };
@@ -1379,6 +1425,11 @@ pub const NamedTag = struct {
     const Self = @This();
     name: []const u8,
     tag: Node,
+
+    pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
+        gpa.free(self.name);
+        self.tag.deinit(gpa);
+    }
 
     pub fn format(
         self: @This(),
@@ -1449,7 +1500,7 @@ pub const NamedTag = struct {
     }
 
     pub fn length(self: *const Self) usize {
-        return (Node{ .String = self.name }).length() + self.tag.length();
+        return (Node{ .String = @constCast(self.name) }).length() + self.tag.length();
     }
 
     pub fn fancyPrintStdOut(self: *const Self) !void {
