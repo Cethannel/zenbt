@@ -32,11 +32,15 @@ pub fn build(b: *std.Build) void {
     // running `zig build`).
     b.installArtifact(lib);
 
-    const exe = b.addExecutable(.{
-        .name = "zenbt",
+    const exe_mod = b.addModule("zenbt", .{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+    });
+
+    const exe = b.addExecutable(.{
+        .name = "zenbt",
+        .root_module = exe_mod,
     });
 
     // This declares intent for the executable to be installed into the
@@ -70,9 +74,7 @@ pub fn build(b: *std.Build) void {
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = lib_mod,
     });
 
     b.installArtifact(lib_unit_tests);
@@ -80,9 +82,7 @@ pub fn build(b: *std.Build) void {
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
     const exe_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = exe_mod,
     });
 
     const install_exe_test = b.addInstallFile(lib_unit_tests.getEmittedBin(), "bin-test");

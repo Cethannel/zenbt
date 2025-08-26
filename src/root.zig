@@ -10,6 +10,7 @@ const parser = @import("parser.zig");
 pub const deserializer = @import("deserializer.zig");
 
 pub const parseFromBytes = parser.parseFromBytes;
+pub const parseFromReader = parser.parseFromReader;
 
 pub const SerializeOptions = struct {
     printErrors: bool = false,
@@ -43,9 +44,9 @@ pub fn serializeNamedTagAlloc(
     options: SerializeOptions,
 ) ![]const u8 {
     options.logTrace("Serializing with alloc", .{});
-    var out = std.ArrayList(u8).init(allocator);
+    var out = std.io.Writer.Allocating.init(allocator);
     errdefer out.deinit();
-    try serializeNamedTag(namedTag, out.writer(), options);
+    try serializeNamedTag(namedTag, &out.writer, options);
     return out.toOwnedSlice();
 }
 

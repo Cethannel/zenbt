@@ -39,7 +39,7 @@ pub const ParseOptions = struct {
 pub fn deserialize(
     comptime T: type,
     allocator: std.mem.Allocator,
-    reader: anytype,
+    reader: *std.io.Reader,
     options: ParseOptions,
 ) !Parsed(T) {
     var astArena = std.heap.ArenaAllocator.init(allocator);
@@ -453,7 +453,7 @@ fn deserializeStruct(
             }
 
             if (field.default_value) |dv| {
-                @field(out, field.name) = @as(*const field.type, @alignCast(@ptrCast(dv))).*;
+                @field(out, field.name) = @as(*const field.type, @ptrCast(@alignCast(dv))).*;
                 break :fBlock true;
             }
 

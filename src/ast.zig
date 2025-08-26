@@ -222,42 +222,42 @@ pub const AstStore = struct {
     pub fn init(allocator: std.mem.Allocator) !Self {
         var out = Self{
             .allocator = allocator,
-            .tag_store = .init(allocator),
-            .idx_store = .init(allocator),
+            .tag_store = .empty,
+            .idx_store = .empty,
 
-            .byte_store = .init(allocator),
+            .byte_store = .empty,
 
-            .short_store = .init(allocator),
+            .short_store = .empty,
 
-            .int_store = .init(allocator),
+            .int_store = .empty,
 
-            .long_store = .init(allocator),
+            .long_store = .empty,
 
-            .float_store = .init(allocator),
+            .float_store = .empty,
 
-            .double_store = .init(allocator),
+            .double_store = .empty,
 
-            .byte_array = .init(allocator),
-            .byte_array_idx = .init(allocator),
-            .byte_array_len = .init(allocator),
+            .byte_array = .empty,
+            .byte_array_idx = .empty,
+            .byte_array_len = .empty,
 
-            .list_idx = .init(allocator),
-            .list_len = .init(allocator),
+            .list_idx = .empty,
+            .list_len = .empty,
 
-            .compound_idx = .init(allocator),
-            .compound_len = .init(allocator),
+            .compound_idx = .empty,
+            .compound_len = .empty,
 
-            .name_idx = .init(allocator),
-            .name_len = .init(allocator),
+            .name_idx = .empty,
+            .name_len = .empty,
 
-            .compound_name = .init(allocator),
-            .compound_node = .init(allocator),
+            .compound_name = .empty,
+            .compound_node = .empty,
 
-            .int_array_idx = .init(allocator),
-            .int_array_len = .init(allocator),
+            .int_array_idx = .empty,
+            .int_array_len = .empty,
 
-            .long_array_idx = .init(allocator),
-            .long_array_len = .init(allocator),
+            .long_array_idx = .empty,
+            .long_array_len = .empty,
 
             .end_named_tag = undefined,
         };
@@ -276,8 +276,8 @@ pub const AstStore = struct {
     }
 
     pub fn newNode(self: *Self, tag: TAG, idx: NodeIndex) !NodeIndex {
-        try self.tag_store.append(tag);
-        try self.idx_store.append(idx);
+        try self.tag_store.append(self.allocator, tag);
+        try self.idx_store.append(self.allocator, idx);
 
         std.debug.assert(self.tag_store.items.len == self.idx_store.items.len);
         const out_idx = self.tag_store.items.len - 1;
@@ -376,24 +376,16 @@ pub const AstStore = struct {
         comptime tag: TAG,
         value: anytype,
     ) !NodeIndex {
-        return addItemToStore(self.getStore(tag), value);
+        return self.addItemToStore(getField(tag), value);
     }
 
-    fn addItemToStore(store: anytype, value: anytype) !NodeIndex {
-        if (StoreType(@TypeOf(store)) != @TypeOf(value)) {
-            @compileError(std.fmt.comptimePrint(
-                \\ value is wrong type 
-                \\ expected: {}
-                \\ got: {}
-            ,
-                .{
-                    StoreType(@TypeOf(store)),
-                    @TypeOf(value),
-                },
-            ));
-        }
-        try store.append(value);
-        return @intCast(store.items.len - 1);
+    fn addItemToStore(
+        self: *Self,
+        comptime store: std.meta.FieldEnum(Self),
+        value: StoreType(@FieldType(Self, @tagName(store))),
+    ) !NodeIndex {
+        try @field(self, @tagName(store)).append(self.allocator, value);
+        return @intCast(@field(self, @tagName(store)).items.len - 1);
     }
 
     pub fn newDouble(self: *Self, value: f64) !NodeIndex {
@@ -452,7 +444,7 @@ pub const AstStore = struct {
 
     fn addToByteArray(self: *Self, arr: []const u8) !NodeIndex {
         const start = self.byte_array.items.len;
-        try self.byte_array.appendSlice(arr);
+        try self.byte_array.appendSlice(self.allocator, arr);
         const end = self.byte_array.items.len;
         std.debug.assert(end - start == arr.len);
         return toIdx(start);
@@ -460,8 +452,8 @@ pub const AstStore = struct {
 
     fn newByteArrayInner(self: *Self, arr: []const u8) !NodeIndex {
         const start = try self.addToByteArray(arr);
-        const idx = try addItemToStore(&self.byte_array_idx, start);
-        const lenIdx = try addItemToStore(&self.byte_array_len, toLen(arr.len));
+        const idx = try self.addItemToStore(.byte_array_idx, start);
+        const lenIdx = try self.addItemToStore(.byte_array_len, toLen(arr.len));
         std.debug.assert(idx == lenIdx);
         return idx;
     }
@@ -541,10 +533,10 @@ pub const AstStore = struct {
         errdefer {
             self.idx_store.items = self.idx_store.items[0..start_idx];
         }
-        try self.tag_store.appendNTimes(tag, len);
+        try self.tag_store.appendNTimes(self.allocator, tag, len);
 
-        const list_idx = try addItemToStore(&self.list_idx, toIdx(start_idx));
-        try self.list_len.append(len);
+        const list_idx = try self.addItemToStore(.list_idx, toIdx(start_idx));
+        try self.list_len.append(self.allocator, len);
 
         return .{
             .idx = list_idx,
@@ -734,12 +726,12 @@ pub const AstStore = struct {
         std.debug.assert(self.tag_store.items.len == self.idx_store.items.len);
         std.debug.assert(self.compound_name.items.len == self.compound_node.items.len);
         const start_idx = self.compound_name.items.len;
-        const name_arr = try self.compound_name.addManyAsSlice(params.len);
-        const node_arr = try self.compound_node.addManyAsSlice(params.len);
+        const name_arr = try self.compound_name.addManyAsSlice(self.allocator, params.len);
+        const node_arr = try self.compound_node.addManyAsSlice(self.allocator, params.len);
 
         const name_start_idx = self.name_idx.items.len;
-        const name_idxs = try self.name_idx.addManyAsSlice(params.len);
-        const name_lens = try self.name_len.addManyAsSlice(params.len);
+        const name_idxs = try self.name_idx.addManyAsSlice(self.allocator, params.len);
+        const name_lens = try self.name_len.addManyAsSlice(self.allocator, params.len);
 
         for (params, 0..) |param, i| {
             name_idxs[i] = try self.addToByteArray(param.name);
@@ -750,8 +742,8 @@ pub const AstStore = struct {
         }
 
         const idx = self.compound_idx.items.len;
-        try self.compound_idx.append(toIdx(start_idx));
-        try self.compound_len.append(toLen(params.len));
+        try self.compound_idx.append(self.allocator, toIdx(start_idx));
+        try self.compound_len.append(self.allocator, toLen(params.len));
 
         return self.newNode(.Compound, toIdx(idx));
     }
@@ -763,8 +755,8 @@ pub const AstStore = struct {
         const start_idx = self.compound_name.items.len;
 
         const idx = self.compound_idx.items.len;
-        try self.compound_idx.append(toIdx(start_idx));
-        try self.compound_len.append(toLen(namedTags.len));
+        try self.compound_idx.append(toIdx(self.allocator, start_idx));
+        try self.compound_len.append(toLen(self.allocator, namedTags.len));
 
         return toIdx(idx);
     }
@@ -825,12 +817,12 @@ pub const AstStore = struct {
 
     fn newIntArrayInner(self: *Self, arr: []const i32) !NodeIndex {
         const start = self.int_store.items.len;
-        try self.int_store.appendSlice(arr);
+        try self.int_store.appendSlice(self.allocator, arr);
         const end = self.int_store.items.len;
         std.debug.assert(end - start == arr.len);
 
-        const idx = try addItemToStore(&self.int_array_idx, toIdx(start));
-        const lenIdx = try addItemToStore(&self.int_array_len, toLen(arr.len));
+        const idx = try self.addItemToStore(.int_array_idx, toIdx(start));
+        const lenIdx = try self.addItemToStore(.int_array_len, toLen(arr.len));
         std.debug.assert(idx == lenIdx);
         return idx;
     }
@@ -862,12 +854,12 @@ pub const AstStore = struct {
 
     fn newLongArrayInner(self: *Self, arr: []const i64) !NodeIndex {
         const start = self.long_store.items.len;
-        try self.long_store.appendSlice(arr);
+        try self.long_store.appendSlice(self.allocator, arr);
         const end = self.long_store.items.len;
         std.debug.assert(end - start == arr.len);
 
-        const idx = try addItemToStore(&self.long_array_idx, toIdx(start));
-        const lenIdx = try addItemToStore(&self.long_array_len, toLen(arr.len));
+        const idx = try self.addItemToStore(.long_array_idx, toIdx(start));
+        const lenIdx = try self.addItemToStore(.long_array_len, toLen(arr.len));
         std.debug.assert(idx == lenIdx);
         return idx;
     }
@@ -898,16 +890,20 @@ pub const AstStore = struct {
     }
 
     fn getStore(self: *Self, comptime tag: TAG) *std.ArrayList(tag.typeOf()) {
-        switch (tag) {
+        return &@field(self, @tagName(getField(tag)));
+    }
+
+    fn getField(comptime tag: TAG) std.meta.FieldEnum(Self) {
+        return switch (tag) {
             .End => @compileError("Not Supported"),
-            .Byte => return &self.byte_store,
-            .Short => return &self.short_store,
-            .Int => return &self.int_store,
-            .Long => return &self.long_store,
-            .Float => return &self.float_store,
-            .Double => return &self.double_store,
+            .Byte => .byte_store,
+            .Short => .short_store,
+            .Int => .int_store,
+            .Long => .long_store,
+            .Float => .float_store,
+            .Double => .double_store,
             else => @compileError("Tag not supported: " ++ @tagName(tag)),
-        }
+        };
     }
 
     pub fn getTag(self: *const Self, idx: NodeIndex) TAG {
@@ -1062,42 +1058,42 @@ pub const AstStore = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.tag_store.deinit();
-        self.idx_store.deinit();
+        self.tag_store.deinit(self.allocator);
+        self.idx_store.deinit(self.allocator);
 
-        self.byte_store.deinit();
+        self.byte_store.deinit(self.allocator);
 
-        self.short_store.deinit();
+        self.short_store.deinit(self.allocator);
 
-        self.int_store.deinit();
+        self.int_store.deinit(self.allocator);
 
-        self.long_store.deinit();
+        self.long_store.deinit(self.allocator);
 
-        self.float_store.deinit();
+        self.float_store.deinit(self.allocator);
 
-        self.double_store.deinit();
+        self.double_store.deinit(self.allocator);
 
-        self.byte_array.deinit();
-        self.byte_array_idx.deinit();
-        self.byte_array_len.deinit();
+        self.byte_array.deinit(self.allocator);
+        self.byte_array_idx.deinit(self.allocator);
+        self.byte_array_len.deinit(self.allocator);
 
-        self.list_idx.deinit();
-        self.list_len.deinit();
+        self.list_idx.deinit(self.allocator);
+        self.list_len.deinit(self.allocator);
 
-        self.compound_idx.deinit();
-        self.compound_len.deinit();
+        self.compound_idx.deinit(self.allocator);
+        self.compound_len.deinit(self.allocator);
 
-        self.name_idx.deinit();
-        self.name_len.deinit();
+        self.name_idx.deinit(self.allocator);
+        self.name_len.deinit(self.allocator);
 
-        self.compound_name.deinit();
-        self.compound_node.deinit();
+        self.compound_name.deinit(self.allocator);
+        self.compound_node.deinit(self.allocator);
 
-        self.int_array_idx.deinit();
-        self.int_array_len.deinit();
+        self.int_array_idx.deinit(self.allocator);
+        self.int_array_len.deinit(self.allocator);
 
-        self.long_array_idx.deinit();
-        self.long_array_len.deinit();
+        self.long_array_idx.deinit(self.allocator);
+        self.long_array_len.deinit(self.allocator);
     }
 
     pub const NamedTag = struct {
@@ -1172,12 +1168,8 @@ pub const Node = union(TAG) {
 
     pub fn format(
         self: @This(),
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
+        writer: *std.io.Writer,
     ) !void {
-        _ = fmt;
-        _ = options;
         try writer.print("TAG_{s}: ", .{@tagName(self)});
         switch (self) {
             .End => return,
@@ -1219,7 +1211,7 @@ pub const Node = union(TAG) {
             ),
             .Compound => |c| {
                 for (c) |value| {
-                    try writer.print("{}\n", .{value});
+                    try writer.print("{f}\n", .{value});
                 }
             },
             .IntArray => |ia| {
@@ -1371,7 +1363,7 @@ pub const Node = union(TAG) {
         }
     }
 
-    fn fancyPrintInner(self: *const Self, writer: anytype, ctx: fancyPrintCtx) anyerror!void {
+    fn fancyPrintInner(self: *const Self, writer: *std.io.Writer, ctx: fancyPrintCtx) anyerror!void {
         switch (self.*) {
             .End => return,
             .ByteArray => |ba| {
@@ -1382,26 +1374,26 @@ pub const Node = union(TAG) {
                     l.items.len,
                     @tagName(l.tag),
                 });
-                try writer.writeBytesNTimes(ctx.indentStr, ctx.depth);
+                _ = try writer.splatBytes(ctx.indentStr, ctx.depth);
                 _ = try writer.write("{\r\n");
 
                 var newCtx = ctx;
                 newCtx.depth += 1;
                 for (l.items) |node| {
-                    try writer.writeBytesNTimes(ctx.indentStr, ctx.depth + 1);
+                    _ = try writer.splatBytes(ctx.indentStr, ctx.depth + 1);
                     try writer.print("TAG_{s}: ", .{@tagName(l.tag)});
                     try node.fancyPrintInner(writer, newCtx);
                     _ = try writer.write("\r\n");
                 }
 
-                try writer.writeBytesNTimes(ctx.indentStr, ctx.depth);
+                _ = try writer.splatBytes(ctx.indentStr, ctx.depth);
                 _ = try writer.write("}");
             },
             .Compound => |c| {
                 try writer.print("{} entries\r\n", .{
                     c.len,
                 });
-                try writer.writeBytesNTimes(ctx.indentStr, ctx.depth);
+                _ = try writer.splatBytes(ctx.indentStr, ctx.depth);
                 _ = try writer.write("{\r\n");
 
                 var newCtx = ctx;
@@ -1411,13 +1403,14 @@ pub const Node = union(TAG) {
                     _ = try writer.write("\r\n");
                 }
 
-                try writer.writeBytesNTimes(ctx.indentStr, ctx.depth);
+                _ = try writer.splatBytes(ctx.indentStr, ctx.depth);
                 _ = try writer.write("}");
             },
             else => {
-                _ = try writer.print("{}", .{self});
+                _ = try writer.print("{f}", .{self});
             },
         }
+        try writer.flush();
     }
 };
 
@@ -1433,12 +1426,8 @@ pub const NamedTag = struct {
 
     pub fn format(
         self: @This(),
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
+        writer: *std.io.Writer,
     ) !void {
-        _ = fmt;
-        _ = options;
         if (self.tag != .End) {
             try writer.print("TAG_{s}(\"{s}\"): ", .{ @tagName(self.tag), self.name });
         }
@@ -1479,14 +1468,14 @@ pub const NamedTag = struct {
             .List => |l| {
                 try writer.print("{} entries of type TAG_{s}\n{{\n", .{ l.items.len, @tagName(l.tag) });
                 for (l.items) |value| {
-                    try writer.print("{}\n", .{value});
+                    try writer.print("{f}\n", .{value});
                 }
                 try writer.print("}}\n", .{});
             },
             .Compound => |c| {
-                try writer.print("{} entries\n{{\n", .{c.len});
+                try writer.print("{d} entries\n{{\n", .{c.len});
                 for (c) |value| {
-                    try writer.print("{}\n", .{value});
+                    try writer.print("{f}\n", .{value});
                 }
                 try writer.print("}}\n", .{});
             },
@@ -1504,20 +1493,23 @@ pub const NamedTag = struct {
     }
 
     pub fn fancyPrintStdOut(self: *const Self) !void {
-        var stdout = std.io.getStdOut();
+        var stdout = std.fs.File.stdout();
         defer stdout.close();
-        try self.fancyPrint(stdout.writer());
+        var buffer: [1024]u8 = @splat(0);
+        var writer = stdout.writer(buffer[0..]);
+        try self.fancyPrint(&writer.interface);
     }
 
-    pub fn fancyPrint(self: *const Self, writer: anytype) !void {
+    pub fn fancyPrint(self: *const Self, writer: *std.io.Writer) !void {
         try self.fancyPrintInner(writer, .{});
     }
 
-    fn fancyPrintInner(self: *const Self, writer: anytype, ctx: fancyPrintCtx) !void {
-        try writer.writeByteNTimes('\t', ctx.depth);
+    fn fancyPrintInner(self: *const Self, writer: *std.io.Writer, ctx: fancyPrintCtx) !void {
+        _ = try writer.splatByte('\t', ctx.depth);
         if (self.tag != .End) {
             try writer.print("TAG_{s}(\"{s}\"): ", .{ @tagName(self.tag), self.name });
         }
+        try writer.flush();
         try self.tag.fancyPrintInner(writer, ctx);
     }
 };

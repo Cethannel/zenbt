@@ -15,14 +15,15 @@ pub fn main() !void {
         });
         try inFile.seekTo(0);
         defer inFile.close();
-        var decompressedData = std.ArrayList(u8).init(allocator);
-        defer decompressedData.deinit();
-        std.compress.gzip.decompress(inFile.reader(), decompressedData.writer()) catch {
-            decompressedData.clearAndFree();
-            try inFile.seekTo(0);
-            try inFile.reader().readAllArrayList(&decompressedData, 1024 * 1024 * 1024);
-        };
-        const out = try root.parseFromBytes(decompressedData.items, allocator, .{
+        var decompressedData = try std.ArrayList(u8).initCapacity(allocator, 1024 * 1024);
+        defer decompressedData.deinit(allocator);
+        const file_buffer = try allocator.alloc(u8, 1024);
+        defer allocator.free(file_buffer);
+        const decompress_buffer = try allocator.alloc(u8, 1024);
+        defer allocator.free(decompress_buffer);
+        var fileReader = inFile.reader(file_buffer);
+        var decompress = std.compress.flate.Decompress.init(&fileReader.interface, .gzip, decompress_buffer);
+        const out = try root.parseFromReader(&decompress.reader, allocator, .{
             .printErrors = true,
         });
         try out.fancyPrintStdOut();

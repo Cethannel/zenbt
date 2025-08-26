@@ -11,8 +11,10 @@ const Parsed = deserializer.Parsed;
 
 const native_endian = @import("builtin").target.cpu.arch.endian();
 
+const readEndian = std.builtin.Endian.big;
+
 pub fn parseFromReader(
-    reader: anytype,
+    reader: *std.io.Reader,
     allocator: std.mem.Allocator,
     options: ParseOptions,
 ) !NamedTag {
@@ -25,11 +27,11 @@ pub fn parseFromReader(
 const endName = "End";
 
 fn parseNamedTag(
-    reader: anytype,
+    reader: *std.io.Reader,
     allocator: std.mem.Allocator,
     options: ParseOptions,
 ) anyerror!NamedTag {
-    const tagByte: u8 = try reader.readByte();
+    const tagByte: u8 = try reader.takeByte();
 
     const tag = std.meta.intToEnum(TAG, tagByte) catch |err| {
         options.logErr("Unknown tag: {}", .{tagByte});
@@ -56,7 +58,7 @@ fn parseNamedTag(
 }
 
 fn parseNodeWithTag(
-    reader: anytype,
+    reader: *std.io.Reader,
     allocator: std.mem.Allocator,
     options: ParseOptions,
     tag: TAG,
@@ -106,7 +108,7 @@ fn parseNodeWithTag(
 }
 
 pub fn parseList(
-    reader: anytype,
+    reader: *std.io.Reader,
     allocator: std.mem.Allocator,
     options: ParseOptions,
 ) !Node {
@@ -115,23 +117,23 @@ pub fn parseList(
 }
 
 pub fn parseAssumeList(
-    reader: anytype,
+    reader: *std.io.Reader,
     allocator: std.mem.Allocator,
     options: ParseOptions,
 ) !Node {
-    const listTagByte: u8 = try reader.readByte();
+    const listTagByte: u8 = try reader.takeByte();
     const listTag = try std.meta.intToEnum(TAG, listTagByte);
     const len = try parseAssumeInt(reader);
     const uLen: usize = @intCast(len.Int);
-    var items = try std.ArrayList(Node).initCapacity(allocator, uLen);
-    errdefer items.deinit();
-    for (0..uLen) |_| {
-        items.appendAssumeCapacity(try parseNodeWithTag(reader, allocator, options, listTag));
+    var items = try allocator.alloc(Node, uLen);
+    errdefer allocator.free(items);
+    for (0..uLen) |i| {
+        items[i] = try parseNodeWithTag(reader, allocator, options, listTag);
     }
     return Node{
         .List = .{
             .tag = listTag,
-            .items = try items.toOwnedSlice(),
+            .items = items,
         },
     };
 }
@@ -155,8 +157,8 @@ pub fn parseFromBytes(
     allocator: std.mem.Allocator,
     options: ParseOptions,
 ) !NamedTag {
-    var stream = std.io.fixedBufferStream(input);
-    return parseFromReader(stream.reader(), allocator, options);
+    var stream = std.io.Reader.fixed(input);
+    return parseFromReader(&stream, allocator, options);
 }
 
 pub fn parseFromType(
@@ -186,45 +188,44 @@ fn innerParseType(
 }
 
 fn parseNode(
-    reader: anytype,
+    reader: *std.io.Reader,
     allocator: std.mem.Allocator,
     options: ParseOptions,
 ) !Node {
-    const tagByte: u8 = try reader.readByte();
+    const tagByte: u8 = try reader.takeByte();
 
     const tag = try std.meta.intToEnum(TAG, tagByte);
 
     return parseNodeWithTag(reader, allocator, options, tag);
 }
 
-fn parseAssumeByte(reader: anytype) !Node {
-    const byte: u8 = try reader.readByte();
+fn parseAssumeByte(reader: *std.io.Reader) !Node {
+    const byte: u8 = try reader.takeByte();
     return Node{
         .Byte = @bitCast(byte),
     };
 }
 
 fn parseByteArray(
-    reader: anytype,
+    reader: *std.io.Reader,
     allocator: std.mem.Allocator,
 ) !Node {
     try checkConsumeTag(reader, TAG.ByteArray);
     return parseAssumeByteArray(reader, allocator);
 }
 
-fn checkConsumeTag(reader: anytype, expectedTag: TAG) !void {
-    const tag: u8 = try reader.readByte();
+fn checkConsumeTag(reader: *std.io.Reader, expectedTag: TAG) !void {
+    const tag: u8 = try reader.takeByte();
     if (tag != @intFromEnum(expectedTag)) {
         return error.WrongTag;
     }
 }
 
-fn parseAssumeByteArray(reader: anytype, allocator: std.mem.Allocator) !Node {
+fn parseAssumeByteArray(reader: *std.io.Reader, allocator: std.mem.Allocator) !Node {
     const len = try parseAssumeInt(reader);
     const uLen: usize = @intCast(len.Int);
-    var arr = try allocator.alloc(u8, uLen);
+    const arr = try reader.readAlloc(allocator, uLen);
     errdefer allocator.free(arr);
-    try readFullBuffer(reader, arr[0..]);
 
     return Node{
         .ByteArray = arr,
@@ -232,7 +233,7 @@ fn parseAssumeByteArray(reader: anytype, allocator: std.mem.Allocator) !Node {
 }
 
 fn parseAssumeIntArray(
-    reader: anytype,
+    reader: *std.io.Reader,
     allocator: std.mem.Allocator,
     options: ParseOptions,
 ) !Node {
@@ -251,7 +252,7 @@ fn parseAssumeIntArray(
 }
 
 fn parseAssumeLongArray(
-    reader: anytype,
+    reader: *std.io.Reader,
     allocator: std.mem.Allocator,
     options: ParseOptions,
 ) !Node {
@@ -269,7 +270,7 @@ fn parseAssumeLongArray(
     };
 }
 
-fn parseString(reader: anytype, allocator: std.mem.Allocator) !Node {
+fn parseString(reader: *std.io.Reader, allocator: std.mem.Allocator) !Node {
     try checkConsumeTag(reader, TAG.String);
     return parseAssumeString(reader, allocator);
 }
@@ -279,8 +280,8 @@ test parseString {
     const str = "test string";
     const input = [_]u8{@intFromEnum(TAG.String)} //
         ++ comptime intToBytesBigEndian(@as(i16, str.len)) ++ str;
-    var stream = std.io.fixedBufferStream(input);
-    const out = try parseString(stream.reader(), alloc);
+    var stream = std.io.Reader.fixed(input);
+    const out = try parseString(&stream, alloc);
     defer alloc.free(out.String);
     var thing: [str.len]u8 = undefined;
     @memcpy(&thing, str);
@@ -290,16 +291,8 @@ test parseString {
     try std.testing.expectEqualDeep(expected, out);
 }
 
-/// Turns reading less than the buffers length into an error
-fn readFullBuffer(reader: anytype, buffer: []u8) !void {
-    const lenRead: usize = try reader.readAll(buffer);
-    if (lenRead < buffer.len) {
-        return error.EndOfStream;
-    }
-}
-
 fn parseAssumeString(
-    reader: anytype,
+    reader: *std.io.Reader,
     allocator: std.mem.Allocator,
 ) !Node {
     const len = try parseAssumeShort(reader);
@@ -310,10 +303,8 @@ fn parseAssumeString(
 
     const ulen: usize = @intCast(len.Short);
 
-    var str = try allocator.alloc(u8, ulen);
+    const str = try reader.readAlloc(allocator, ulen);
     errdefer allocator.free(str);
-
-    try readFullBuffer(reader, str[0..]);
 
     return Node{
         .String = str,
@@ -321,20 +312,20 @@ fn parseAssumeString(
 }
 
 fn parseAssumeCompound(
-    reader: anytype,
+    reader: *std.io.Reader,
     allocator: std.mem.Allocator,
     options: ParseOptions,
 ) !Node {
-    var namedTags = std.ArrayList(NamedTag).init(allocator);
-    errdefer namedTags.deinit();
+    var namedTags = std.ArrayList(NamedTag).empty;
+    errdefer namedTags.deinit(allocator);
 
     var namedTag = try parseNamedTag(reader, allocator, options);
     while (namedTag.tag != .End) : (namedTag = try parseNamedTag(reader, allocator, options)) {
-        try namedTags.append(namedTag);
+        try namedTags.append(allocator, namedTag);
     }
 
     return Node{
-        .Compound = try namedTags.toOwnedSlice(),
+        .Compound = try namedTags.toOwnedSlice(allocator),
     };
 }
 
@@ -348,52 +339,52 @@ fn parseShort(input: []const u8) !Node {
     return parseAssumeShort(input[1..]);
 }
 
-fn parseAssumeShort(reader: anytype) !Node {
-    const short = try readTBigEndian(i16, reader);
+fn parseAssumeShort(reader: *std.io.Reader) !Node {
+    const short = try reader.takeInt(i16, readEndian);
     return Node{
         .Short = short,
     };
 }
 
-fn parseInt(reader: anytype) !Node {
-    const tag: u8 = try reader.readByte();
+fn parseInt(reader: *std.io.Reader) !Node {
+    const tag: u8 = try reader.takeByte();
     if (tag != @intFromEnum(TAG.Int)) {
         return error.ExpectedInt;
     }
     return parseAssumeInt(reader);
 }
 
-fn parseAssumeInt(reader: anytype) !Node {
-    const int = try readTBigEndian(i32, reader);
+fn parseAssumeInt(reader: *std.io.Reader) !Node {
+    const int = try reader.takeInt(i32, readEndian);
     return Node{
         .Int = int,
     };
 }
 
-fn parseAssumeLong(reader: anytype) !Node {
-    const long = try readTBigEndian(i64, reader);
+fn parseAssumeLong(reader: *std.io.Reader) !Node {
+    const long = try reader.takeInt(i64, readEndian);
     return Node{
         .Long = long,
     };
 }
 
-fn parseAssumeFloat(reader: anytype) !Node {
+fn parseAssumeFloat(reader: *std.io.Reader) !Node {
     const float = try readTBigEndian(f32, reader);
     return Node{
         .Float = float,
     };
 }
 
-fn parseAssumeDouble(reader: anytype) !Node {
+fn parseAssumeDouble(reader: *std.io.Reader) !Node {
     const double = try readTBigEndian(f64, reader);
     return Node{
         .Double = double,
     };
 }
 
-fn readTBigEndian(comptime T: type, reader: anytype) !T {
+fn readTBigEndian(comptime T: type, reader: *std.io.Reader) !T {
     var bytes: [@sizeOf(T)]u8 = undefined;
-    try readFullBuffer(reader, bytes[0..]);
+    try reader.readSliceAll(bytes[0..]);
     return bytesToTBigEndian(T, bytes[0..]);
 }
 
